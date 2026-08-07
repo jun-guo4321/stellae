@@ -82,6 +82,8 @@ jobs:
               implementation("androidx.camera:camera-view:1.3.1")
               // 定位依赖
               implementation("com.google.android.gms:play-services-location:21.0.1")
+              // 协程与 Play Services 集成（修复 await() 问题）
+              implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
           }
           EOF
       - run: |
@@ -126,7 +128,8 @@ jobs:
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <resources><string name="app_name">\u661f\u9ece</string></resources>
           EOF
-      # ========== 以下为全部源码文件（已整合所有修改） ==========
+
+      # ========== 以下为所有源码文件（已全部修正） ==========
 
       # 1. ChatMessage.kt
       - run: |
@@ -265,7 +268,7 @@ jobs:
           )
           EOF
 
-      # 4. core 包（情绪、记忆衰减、开环管理、主动消息、关系弧、陪伴生活）
+      # 4. core 包（保持不变）
       - run: |
           cat > app/src/main/java/com/example/stellae/core/MemoryDecayEngine.kt << 'EOF'
           package com.example.stellae.core
@@ -696,7 +699,7 @@ jobs:
           enum class ActivityType { WAKING_UP, READING, LUNCH, WORKING, WALKING, DINNER, RELAXING, SLEEPING }
           EOF
 
-      # 5. SpeechManager（支持动态音色 + 试听）
+      # 5. SpeechManager（已修正）
       - run: |
           cat > app/src/main/java/com/example/stellae/SpeechManager.kt << 'EOF'
           package com.example.stellae
@@ -791,7 +794,6 @@ jobs:
                   }
               }
 
-              // 试听专用方法：不清理任务标签
               suspend fun previewVoice(voice: String, onComplete: (() -> Unit)? = null) {
                   val text = "\u8fd9\u662f\u4e00\u6bb5\u8bd5\u542c\u8bed\u97f3\uff0c\u4f60\u89c9\u5f97\u8fd9\u4e2a\u97f3\u8272\u600e\u4e48\u6837\uff1f"
                   tryEdgeTts(text, voice, onComplete)
@@ -846,7 +848,7 @@ jobs:
           }
           EOF
 
-      # 6. MemoryManager（含 get/set 设置）
+      # 6. MemoryManager（已修正）
       - run: |
           cat > app/src/main/java/com/example/stellae/MemoryManager.kt << 'EOF'
           package com.example.stellae
@@ -952,7 +954,7 @@ jobs:
           data class MemoryEntry(val content: String, val category: String, val timestamp: Long)
           EOF
 
-      # 7. AIRepository（云端优化 + 位置上下文）
+      # 7. AIRepository（已修正，包含位置）
       - run: |
           cat > app/src/main/java/com/example/stellae/AIRepository.kt << 'EOF'
           package com.example.stellae
@@ -975,13 +977,12 @@ jobs:
           class AIRepository(private val context: Context) {
               private val gson = Gson()
               private val client = OkHttpClient.Builder()
-                  .connectTimeout(5, TimeUnit.SECONDS)   // 缩短超时
+                  .connectTimeout(5, TimeUnit.SECONDS)
                   .readTimeout(8, TimeUnit.SECONDS)
                   .build()
               private val API_KEY = "ark-cc51dab3-1c7e-4f20-9764-45ec3dfa2586-2d686"
               private val BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 
-              // 位置信息（由ViewModel注入）
               var currentLocation: LocationInfo? = null
 
               fun routeTask(input: String): TaskType {
@@ -992,7 +993,6 @@ jobs:
                       lower.contains("\u96be\u8fc7") || lower.contains("\u4e0d\u5f00\u5fc3") || lower.contains("\u7d2f") || lower.contains("\u538b\u529b") -> TaskType.EMOTIONAL_SUPPORT
                       lower.contains("\u66ff\u4ee3") || lower.contains("\u5973\u670b\u53cb") || lower.contains("\u771f\u5b9e") -> TaskType.BOUNDARY
                       lower.contains("\u5bf9\u4e0d\u8d77") || lower.contains("\u62b1\u6b49") || lower.contains("\u6211\u9519\u4e86") -> TaskType.APOLOGY
-                      // 定位相关关键词
                       lower.contains("\u5403\u4ec0\u4e48") || lower.contains("\u597d\u5403") || lower.contains("\u9910\u5385") || lower.contains("\u7f8e\u98df") ||
                       lower.contains("\u73a9\u7684") || lower.contains("\u666f\u70b9") || lower.contains("\u63a8\u8350") || lower.contains("\u9644\u8fd1") ||
                       lower.contains("\u54ea\u91cc") || lower.contains("\u600e\u4e48\u53bb") -> TaskType.LOCATION
@@ -1034,7 +1034,6 @@ jobs:
                           emotionState.getAffinityScore(), relationshipStage, taskType, companionLife,
                           personality, relation, location
                       )
-                      // 优化：只传递最近3条历史消息
                       val messages = buildMessageList(systemPrompt, conversationHistory.takeLast(3), userInput, memories, imageBase64)
                       val response = callLLM(messages)
                       ChatMessage(response, false, taskType.label, if (memories.isNotEmpty()) "\u8bb0\u5fc6\u89e6\u53d1: ${memories.first().content.take(30)}..." else null)
@@ -1276,7 +1275,7 @@ jobs:
           data class LocationInfo(val city: String, val district: String, val address: String, val lat: Double, val lon: Double)
           EOF
 
-      # 8. ChatViewModel（整合定位 + 试听 + 优化）
+      # 8. ChatViewModel（已修正：导入 await，previewVoice 改为普通函数，定位修复）
       - run: |
           cat > app/src/main/java/com/example/stellae/ChatViewModel.kt << 'EOF'
           package com.example.stellae
@@ -1298,10 +1297,10 @@ jobs:
           import kotlinx.coroutines.flow.asStateFlow
           import kotlinx.coroutines.launch
           import kotlinx.coroutines.runBlocking
+          import kotlinx.coroutines.tasks.await  // 关键：导入 await 扩展
           import okhttp3.OkHttpClient
           import okhttp3.Request
           import com.google.gson.Gson
-          import java.io.IOException
 
           class ChatViewModel(application: Application) : AndroidViewModel(application) {
               private val aiRepository = AIRepository(application)
@@ -1340,7 +1339,6 @@ jobs:
                       val savedName = memoryManager.getCompanionName()
                       _companionName.value = savedName
                       _messages.value = listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f${savedName}\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210"))
-                      // 启动时尝试获取位置
                       fetchLocation()
                   }
                   startEmotionTicker()
@@ -1348,7 +1346,7 @@ jobs:
                   startProactiveChecker()
               }
 
-              // === 设置方法 ===
+              // === 设置方法（全部普通函数，内部启动协程） ===
               fun setCompanionName(name: String) {
                   viewModelScope.launch {
                       memoryManager.setCompanionName(name)
@@ -1357,27 +1355,21 @@ jobs:
                   }
               }
 
-              fun getSelectedVoice(): String {
-                  return runBlocking { memoryManager.getSetting("voice") ?: "zh-CN-XiaoxiaoNeural" }
-              }
+              fun getSelectedVoice(): String = runBlocking { memoryManager.getSetting("voice") ?: "zh-CN-XiaoxiaoNeural" }
               fun setVoice(voice: String) { viewModelScope.launch { memoryManager.setSetting("voice", voice) } }
 
-              fun getPersonality(): String {
-                  return runBlocking { memoryManager.getSetting("personality") ?: "\u6e29\u67d4" }
-              }
+              fun getPersonality(): String = runBlocking { memoryManager.getSetting("personality") ?: "\u6e29\u67d4" }
               fun setPersonality(p: String) { viewModelScope.launch { memoryManager.setSetting("personality", p) } }
 
-              fun getRelation(): String {
-                  return runBlocking { memoryManager.getSetting("relation") ?: "\u670b\u53cb" }
-              }
+              fun getRelation(): String = runBlocking { memoryManager.getSetting("relation") ?: "\u670b\u53cb" }
               fun setRelation(r: String) { viewModelScope.launch { memoryManager.setSetting("relation", r) } }
 
-              // 音色试听
+              // 音色试听（普通函数）
               fun previewVoice(voice: String) {
                   viewModelScope.launch { speechManager.previewVoice(voice) }
               }
 
-              // 定位获取
+              // 定位
               private suspend fun fetchLocation() {
                   try {
                       if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION)
@@ -1397,7 +1389,6 @@ jobs:
                       try {
                           val lat = location.latitude
                           val lon = location.longitude
-                          // 使用Nominatim反向地理编码（免费，无需Key）
                           val url = "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&addressdetails=1"
                           val request = Request.Builder().url(url).header("User-Agent", "StellaeApp").build()
                           val response = httpClient.newCall(request).execute()
@@ -1423,7 +1414,6 @@ jobs:
                   }
               }
 
-              // 主动获取位置（供外部调用）
               fun requestLocationUpdate() {
                   viewModelScope.launch { fetchLocation() }
               }
@@ -1440,7 +1430,6 @@ jobs:
                           return@launch
                       }
 
-                      // 检测改名
                       val newName = aiRepository.extractNameChange(text)
                       if (newName != null && newName.length <= 6) {
                           memoryManager.setCompanionName(newName)
@@ -1450,7 +1439,6 @@ jobs:
                           return@launch
                       }
 
-                      // 如果涉及位置关键词，先获取位置（如果还没有）
                       if (aiRepository.routeTask(text) == TaskType.LOCATION && currentLocation == null) {
                           fetchLocation()
                       }
@@ -1467,7 +1455,31 @@ jobs:
                   }
               }
 
-              fun startRecording() {
+              // 点击录音：开始/停止
+              fun toggleRecording() {
+                  if (_isRecording.value) {
+                      // 停止录音并发送
+                      stopRecording()
+                  } else {
+                      // 检查权限
+                      if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.RECORD_AUDIO)
+                          == PackageManager.PERMISSION_GRANTED) {
+                          startRecording()
+                      } else {
+                          // 权限请求由 Activity 处理，这里只标记
+                          _isRecording.value = false
+                      }
+                  }
+              }
+
+              fun cancelRecording() {
+                  if (_isRecording.value) {
+                      stopRecording()
+                      // 不发送，丢弃识别结果
+                  }
+              }
+
+              private fun startRecording() {
                   _isRecording.value = true
                   speechManager.startListening { recognizedText ->
                       viewModelScope.launch {
@@ -1477,7 +1489,7 @@ jobs:
                   }
               }
 
-              fun stopRecording() {
+              private fun stopRecording() {
                   _isRecording.value = false
                   speechManager.stopListening()
               }
@@ -1586,16 +1598,9 @@ jobs:
                   return (System.currentTimeMillis() - sessionStartTime) / (1000 * 60) > 120
               }
           }
-
-          // 扩展 suspend 获取 lastLocation
-          private suspend fun FusedLocationProviderClient.awaitLocation(): Location? {
-              return try {
-                  lastLocation.await()
-              } catch (e: Exception) { null }
-          }
           EOF
 
-      # 9. SettingsScreen（增加音色试听按钮）
+      # 9. SettingsScreen（修正 previewVoice 调用）
       - run: |
           cat > app/src/main/java/com/example/stellae/ui/settings/SettingsScreen.kt << 'EOF'
           package com.example.stellae.ui.settings
@@ -1613,6 +1618,7 @@ jobs:
           import androidx.compose.ui.unit.dp
           import androidx.lifecycle.viewmodel.compose.viewModel
           import com.example.stellae.ChatViewModel
+          import kotlinx.coroutines.launch
 
           @OptIn(ExperimentalMaterial3Api::class)
           @Composable
@@ -1620,6 +1626,7 @@ jobs:
               onBack: () -> Unit,
               viewModel: ChatViewModel = viewModel()
           ) {
+              val scope = rememberCoroutineScope()
               val companionName by viewModel.companionName.collectAsState()
               var nameInput by remember { mutableStateOf(companionName) }
               var selectedVoice by remember { mutableStateOf(viewModel.getSelectedVoice()) }
@@ -1683,7 +1690,7 @@ jobs:
                                           text = { Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                               Text(label)
                                               IconButton(onClick = {
-                                                  viewModel.previewVoice(key)
+                                                  scope.launch { viewModel.previewVoice(key) }
                                               }) {
                                                   Icon(Icons.Default.PlayArrow, null)
                                               }
@@ -1731,12 +1738,10 @@ jobs:
                           }
                       }}
 
-                      // 5. 位置信息（显示当前城市）
+                      // 5. 位置信息
                       Card { Column(modifier = Modifier.padding(16.dp)) {
                           Text("当前位置", style = MaterialTheme.typography.titleMedium)
                           Spacer(modifier = Modifier.height(8.dp))
-                          // 简单的占位，实际可从ViewModel获取
-                          // 可以加一个刷新按钮
                           Button(onClick = { viewModel.requestLocationUpdate() }) {
                               Text("刷新位置")
                           }
@@ -1746,7 +1751,7 @@ jobs:
           }
           EOF
 
-      # 10. MainActivity（修复按住说话 + 设置入口）
+      # 10. MainActivity（改为点击录音，添加取消按钮）
       - run: |
           cat > app/src/main/java/com/example/stellae/MainActivity.kt << 'EOF'
           package com.example.stellae
@@ -1776,10 +1781,6 @@ jobs:
           import androidx.compose.ui.draw.clip
           import androidx.compose.ui.graphics.Color
           import androidx.compose.ui.graphics.asImageBitmap
-          import androidx.compose.foundation.gestures.awaitEachGesture
-          import androidx.compose.foundation.gestures.awaitFirstDown
-          import androidx.compose.ui.input.pointer.pointerInput
-          import androidx.compose.foundation.gestures.waitForUpOrCancellation
           import androidx.compose.ui.text.input.ImeAction
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
@@ -1919,47 +1920,54 @@ jobs:
                                       })
                                   )
 
-                                  // 按住说话 + 发送按钮（修复版）
-                                  Box(
-                                      modifier = Modifier
-                                          .size(48.dp)
-                                          .clip(CircleShape)
-                                          .background(
-                                              when {
-                                                  isRecording -> Color(0xFFEF5350)
-                                                  inputText.isNotBlank() -> Color(0xFF1C1C1E)
-                                                  else -> Color(0xFF1C1C1E)
-                                              }
-                                          )
-                                          .pointerInput(Unit) {
-                                              awaitEachGesture {
-                                                  val down = awaitFirstDown()
-                                                  // 如果输入框有文字，则不启动录音，直接发送
-                                                  if (inputText.isBlank()) {
-                                                      // 请求录音权限
+                                  // 录音 / 取消按钮
+                                  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                      if (isRecording) {
+                                          // 显示“X”取消按钮
+                                          IconButton(
+                                              onClick = {
+                                                  viewModel.cancelRecording()
+                                              },
+                                              modifier = Modifier.size(48.dp)
+                                          ) {
+                                              Icon(Icons.Default.Close, null, tint = Color.Red)
+                                          }
+                                      }
+                                      // 麦克风按钮（点击切换录音）
+                                      Box(
+                                          modifier = Modifier
+                                              .size(48.dp)
+                                              .clip(CircleShape)
+                                              .background(
+                                                  when {
+                                                      isRecording -> Color(0xFFEF5350)
+                                                      inputText.isNotBlank() -> Color(0xFF1C1C1E)
+                                                      else -> Color(0xFF1C1C1E)
+                                                  }
+                                              )
+                                              .clickable {
+                                                  if (inputText.isNotBlank()) {
+                                                      // 有文字时直接发送
+                                                      viewModel.sendMessage(inputText)
+                                                      inputText = ""
+                                                  } else {
+                                                      // 否则切换录音
                                                       if (recordAudioPermissionState.status.isGranted) {
-                                                          viewModel.startRecording()
+                                                          viewModel.toggleRecording()
                                                       } else {
                                                           recordAudioPermissionState.launchPermissionRequest()
                                                       }
                                                   }
-                                                  val up = waitForUpOrCancellation()
-                                                  if (inputText.isBlank() && up != null) {
-                                                      viewModel.stopRecording()
-                                                  } else if (inputText.isNotBlank() && up != null) {
-                                                      viewModel.sendMessage(inputText)
-                                                      inputText = ""
-                                                  }
-                                              }
-                                          },
-                                      contentAlignment = Alignment.Center
-                                  ) {
-                                      Icon(
-                                          imageVector = if (inputText.isNotBlank()) Icons.Default.Send else Icons.Default.Mic,
-                                          contentDescription = null,
-                                          tint = Color.White,
-                                          modifier = Modifier.size(20.dp)
-                                      )
+                                              },
+                                          contentAlignment = Alignment.Center
+                                      ) {
+                                          Icon(
+                                              imageVector = if (isRecording) Icons.Default.Mic else Icons.Default.Mic,
+                                              contentDescription = null,
+                                              tint = Color.White,
+                                              modifier = Modifier.size(20.dp)
+                                          )
+                                      }
                                   }
                               }
                           }
@@ -2015,7 +2023,7 @@ jobs:
           }
           EOF
 
-      # ========== 最后构建并上传 ==========
+      # ========== 构建 ==========
       - run: gradle assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
