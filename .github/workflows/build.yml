@@ -61,7 +61,7 @@ jobs:
               implementation("com.google.accompanist:accompanist-permissions:0.32.0")
               implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
               implementation("androidx.activity:activity-compose:1.8.2")
-              implementation(platform("androidx.compose:compose-bom:2024.02.00"))
+              implementation(platform("androidx.compose:compose-bom:2024.09.00"))
               implementation("androidx.compose.ui:ui")
               implementation("androidx.compose.material3:material3")
               implementation("androidx.compose.material:material-icons-core")
@@ -943,9 +943,9 @@ jobs:
 
               fun extractNameChange(input: String): String? {
                   val patterns = listOf(
-                      Regex("(?:\u4ee5\u540e|\u4ee5\u540e\u5c31|\u4ee5\u540e\u4f60\u5c31|\u4ee5\u540e\u53eb\u4f60|\u53eb\u4f60|\u4f60\u5c31\u53eb|\u6539\u540d\u53eb|\u6539\u540d|\u540d\u5b57\u6539\u6210|\u540d\u5b57\u6539\u4e3a|\u53eb)([^\uff0c\u3002\uff01\uff1f\s]{1,6})(?:\u5427|\u5417|\u561b|\u5462|\u54e6|\u5440|\u554a|\uff01)"),
-                      Regex("(?:\u4f60\u7684\u540d\u5b57|\u4f60\u53eb)([^\uff0c\u3002\uff01\uff1f\s]{1,6})(?:\u597d\u4e0d\u597d|\u600e\u4e48\u6837|\u884c\u5417|\u53ef\u4ee5\u5417|\u5427)"),
-                      Regex("(?:\u6211[\u60f3\u7ed9\u8981]\u53eb\u4f60|\u6211[\u60f3\u7ed9\u8981]\u7ed9\u4f60\u8d77[\u4e2a]?\u540d\u5b57|\u6211[\u60f3\u7ed9\u8981]\u53eb\u4f60)([^\uff0c\u3002\uff01\uff1f\s]{1,6})")
+                      Regex("(?:\u4ee5\u540e|\u4ee5\u540e\u5c31|\u4ee5\u540e\u4f60\u5c31|\u4ee5\u540e\u53eb\u4f60|\u53eb\u4f60|\u4f60\u5c31\u53eb|\u6539\u540d\u53eb|\u6539\u540d|\u540d\u5b57\u6539\u6210|\u540d\u5b57\u6539\u4e3a|\u53eb)([^\uff0c\u3002\uff01\uff1f\\s]{1,6})(?:\u5427|\u5417|\u561b|\u5462|\u54e6|\u5440|\u554a|\uff01)"),
+                      Regex("(?:\u4f60\u7684\u540d\u5b57|\u4f60\u53eb)([^\uff0c\u3002\uff01\uff1f\\s]{1,6})(?:\u597d\u4e0d\u597d|\u600e\u4e48\u6837|\u884c\u5417|\u53ef\u4ee5\u5417|\u5427)"),
+                      Regex("(?:\u6211[\u60f3\u7ed9\u8981]\u53eb\u4f60|\u6211[\u60f3\u7ed9\u8981]\u7ed9\u4f60\u8d77[\u4e2a]?\u540d\u5b57|\u6211[\u60f3\u7ed9\u8981]\u53eb\u4f60)([^\uff0c\u3002\uff01\uff1f\\s]{1,6})")
                   )
                   for (pattern in patterns) {
                       pattern.find(input)?.let { return it.groupValues[1].trim() }
@@ -1396,6 +1396,7 @@ jobs:
           import android.os.Bundle
           import androidx.activity.ComponentActivity
           import androidx.activity.compose.setContent
+          import androidx.activity.compose.rememberLauncherForActivityResult
           import androidx.activity.result.contract.ActivityResultContracts
           import androidx.compose.foundation.Image
           import androidx.compose.foundation.background
@@ -1418,10 +1419,10 @@ jobs:
           import androidx.compose.ui.draw.clip
           import androidx.compose.ui.graphics.Color
           import androidx.compose.ui.graphics.asImageBitmap
-          import androidx.compose.ui.input.pointer.awaitEachGesture
-          import androidx.compose.ui.input.pointer.awaitFirstDown
+          import androidx.compose.foundation.gestures.awaitEachGesture
+          import androidx.compose.foundation.gestures.awaitFirstDown
           import androidx.compose.ui.input.pointer.pointerInput
-          import androidx.compose.ui.input.pointer.waitForUpOrCancellation
+          import androidx.compose.foundation.gestures.waitForUpOrCancellation
           import androidx.compose.ui.text.input.ImeAction
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
