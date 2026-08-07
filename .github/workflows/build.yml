@@ -1062,20 +1062,7 @@ jobs:
                       RelationshipStage.CONFLICT -> "冲突中"
                       RelationshipStage.RECONCILING -> "和好中"
                   }
-                  _companionStatus.value = companionLife.getCurrentState().description
-                  _relationshipStage.value = when (emotionEngine.getRelationshipStage()) {
-                      RelationshipStage.STRANGER -> "陌生"
-                      RelationshipStage.NORMAL -> "普通"
-                      RelationshipStage.FAMILIAR -> "熟悉"
-                      RelationshipStage.CLOSE -> "亲密"
-                      RelationshipStage.CONFLICT -> "冲突中"
-                      RelationshipStage.RECONCILING -> "和好中"
-                  }
-                  _companionStatus.value = companionLife.getCurrentState().description
-                  memoryManager.saveInteraction(userInput, response.content, emotionLabel)
-                  companionLife.updateEnergy(1)
-                  recallableMemories.forEach { memoryManager.updateMemory(memoryDecayEngine.refreshMemoryOnRecall(it.memory)) }
-              }
+                  _companionStatus.value = companionLife.getCurrentState().description              }
               private suspend fun handleConflictResponse(response: String, userInput: String) {
                   _isProcessing.value = true
                   delay(800)
@@ -1251,7 +1238,7 @@ jobs:
                                   onClick = {
                                       when {
                                           isRecording -> viewModel.stopRecording()
-                                          recordAudioPermissionState.hasPermission -> viewModel.startRecording()
+                                          recordAudioPermissionState.status.isGranted -> viewModel.startRecording()
                                           else -> recordAudioPermissionState.launchPermissionRequest()
                                       }
                                   },
