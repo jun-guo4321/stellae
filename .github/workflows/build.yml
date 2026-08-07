@@ -1159,6 +1159,7 @@ jobs:
           import androidx.lifecycle.viewmodel.compose.viewModel
           import com.google.accompanist.permissions.ExperimentalPermissionsApi
           import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.isGranted
           import kotlinx.coroutines.launch
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
