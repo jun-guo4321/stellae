@@ -80,6 +80,8 @@ jobs:
               implementation("androidx.camera:camera-camera2:1.3.1")
               implementation("androidx.camera:camera-lifecycle:1.3.1")
               implementation("androidx.camera:camera-view:1.3.1")
+              // 定位依赖
+              implementation("com.google.android.gms:play-services-location:21.0.1")
           }
           EOF
       - run: |
@@ -109,6 +111,8 @@ jobs:
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
               <application android:label="Stellae" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
@@ -122,7 +126,9 @@ jobs:
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <resources><string name="app_name">\u661f\u9ece</string></resources>
           EOF
-      # ========== 原文件（保持不变） ==========
+      # ========== 以下为全部源码文件（已整合所有修改） ==========
+
+      # 1. ChatMessage.kt
       - run: |
           cat > app/src/main/java/com/example/stellae/ChatMessage.kt << 'EOF'
           package com.example.stellae
@@ -137,6 +143,8 @@ jobs:
           data class OrchestrationStep(val description: String, val status: StepStatus)
           enum class StepStatus { DONE, ACTIVE, PENDING }
           EOF
+
+      # 2. data 包
       - run: |
           cat > app/src/main/java/com/example/stellae/data/MemoryEntity.kt << 'EOF'
           package com.example.stellae.data
@@ -181,6 +189,7 @@ jobs:
               @Query("DELETE FROM settings WHERE key = :key") suspend fun delete(key: String)
           }
           EOF
+
       - run: |
           cat > app/src/main/java/com/example/stellae/data/AppDatabase.kt << 'EOF'
           package com.example.stellae.data
@@ -209,6 +218,8 @@ jobs:
               }
           }
           EOF
+
+      # 3. Theme
       - run: |
           cat > app/src/main/java/com/example/stellae/ui/theme/StellaeTheme.kt << 'EOF'
           package com.example.stellae.ui.theme
@@ -237,6 +248,7 @@ jobs:
               MaterialTheme(colorScheme = if (darkTheme) DarkColors else LightColors, content = content)
           }
           EOF
+
       - run: |
           cat > app/src/main/java/com/example/stellae/ui/theme/Type.kt << 'EOF'
           package com.example.stellae.ui.theme
@@ -252,7 +264,8 @@ jobs:
               labelSmall = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 16.sp, letterSpacing = 0.5.sp)
           )
           EOF
-      # ========== 核心引擎文件（未修改，保持原样） ==========
+
+      # 4. core 包（情绪、记忆衰减、开环管理、主动消息、关系弧、陪伴生活）
       - run: |
           cat > app/src/main/java/com/example/stellae/core/MemoryDecayEngine.kt << 'EOF'
           package com.example.stellae.core
@@ -296,6 +309,7 @@ jobs:
           }
           data class RankedMemory(val memory: MemoryEntity, val freshness: Double, val score: Double)
           EOF
+
       - run: |
           cat > app/src/main/java/com/example/stellae/core/EmotionEngine.kt << 'EOF'
           package com.example.stellae.core
@@ -421,6 +435,7 @@ jobs:
           enum class EventType { USER_PRAISE, USER_HURTFUL, USER_APOLOGY, USER_SHARE_GOOD, USER_SHARE_BAD, AI_GOAL_ACHIEVED, AI_GOAL_FAILED, SURPRISE }
           enum class RelationshipStage { STRANGER, NORMAL, FAMILIAR, CLOSE, CONFLICT, RECONCILING }
           EOF
+
       - run: |
           cat > app/src/main/java/com/example/stellae/core/OpenLoopManager.kt << 'EOF'
           package com.example.stellae.core
@@ -498,6 +513,7 @@ jobs:
           enum class OpenLoopStatus { PENDING, COMPLETED, FAILED, POSTPONED }
           enum class OpenLoopResolution { COMPLETED, FAILED, POSTPONED, UNKNOWN }
           EOF
+
       - run: |
           cat > app/src/main/java/com/example/stellae/core/ProactiveMessageEngine.kt << 'EOF'
           package com.example.stellae.core
@@ -562,6 +578,7 @@ jobs:
           data class ProactiveMessage(val content: String, val category: String, val urgency: ProactiveUrgency)
           enum class ProactiveUrgency { CASUAL, THOUGHTFUL, CONCERNED }
           EOF
+
       - run: |
           cat > app/src/main/java/com/example/stellae/core/RelationshipArc.kt << 'EOF'
           package com.example.stellae.core
@@ -621,6 +638,7 @@ jobs:
           }
           enum class ApologyResult { ACCEPTED, SOFTENING, REJECTED_NEED_MORE, REJECTED_INSINCERE }
           EOF
+
       - run: |
           cat > app/src/main/java/com/example/stellae/core/CompanionLife.kt << 'EOF'
           package com.example.stellae.core
@@ -678,637 +696,263 @@ jobs:
           enum class ActivityType { WAKING_UP, READING, LUNCH, WORKING, WALKING, DINNER, RELAXING, SLEEPING }
           EOF
 
-      # ========== 以下为本次新增/修改的核心文件 ==========
-
-      # 1. 新增设置界面
+      # 5. SpeechManager（支持动态音色 + 试听）
       - run: |
-          cat > app/src/main/java/com/example/stellae/ui/settings/SettingsScreen.kt << 'EOF'
-          package com.example.stellae.ui.settings
-
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.rememberScrollState
-          import androidx.compose.foundation.verticalScroll
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.ArrowBack
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.unit.dp
-          import androidx.lifecycle.viewmodel.compose.viewModel
-          import com.example.stellae.ChatViewModel
-
-          @OptIn(ExperimentalMaterial3Api::class)
-          @Composable
-          fun SettingsScreen(
-              onBack: () -> Unit,
-              viewModel: ChatViewModel = viewModel()
-          ) {
-              val companionName by viewModel.companionName.collectAsState()
-              var nameInput by remember { mutableStateOf(companionName) }
-              var selectedVoice by remember { mutableStateOf(viewModel.getSelectedVoice()) }
-              var selectedPersonality by remember { mutableStateOf(viewModel.getPersonality()) }
-              var selectedRelation by remember { mutableStateOf(viewModel.getRelation()) }
-
-              Scaffold(
-                  topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }) }
-              ) { padding ->
-                  Column(
-                      modifier = Modifier
-                          .fillMaxSize()
-                          .padding(padding)
-                          .verticalScroll(rememberScrollState())
-                          .padding(16.dp),
-                      verticalArrangement = Arrangement.spacedBy(16.dp)
-                  ) {
-                      // 1. 修改名字
-                      Card { Column(modifier = Modifier.padding(16.dp)) {
-                          Text("修改 AI 名字", style = MaterialTheme.typography.titleMedium)
-                          Spacer(modifier = Modifier.height(8.dp))
-                          OutlinedTextField(
-                              value = nameInput,
-                              onValueChange = { nameInput = it },
-                              label = { Text("新名字") },
-                              singleLine = true,
-                              modifier = Modifier.fillMaxWidth()
-                          )
-                          Button(onClick = { viewModel.setCompanionName(nameInput) }) {
-                              Text("保存名字")
-                          }
-                      }}
-
-                      // 2. 音色选择
-                      Card { Column(modifier = Modifier.padding(16.dp)) {
-                          Text("音色选择", style = MaterialTheme.typography.titleMedium)
-                          Spacer(modifier = Modifier.height(8.dp))
-                          val voices = listOf(
-                              "zh-CN-XiaoxiaoNeural" to "晓晓（女，温柔）",
-                              "zh-CN-YunxiNeural" to "云希（男，阳光）",
-                              "zh-CN-YunjianNeural" to "云健（男，沉稳）",
-                              "zh-CN-XiaoyiNeural" to "晓伊（女，活泼）",
-                              "zh-CN-YunyangNeural" to "云扬（男，新闻）",
-                              "zh-CN-XiaochenNeural" to "晓辰（女，温暖）"
-                          )
-                          var expanded by remember { mutableStateOf(false) }
-                          ExposedDropdownMenuBox(
-                              expanded = expanded,
-                              onExpandedChange = { expanded = it }
-                          ) {
-                              TextField(
-                                  value = voices.find { it.first == selectedVoice }?.second ?: selectedVoice,
-                                  onValueChange = {},
-                                  readOnly = true,
-                                  trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                                  modifier = Modifier.fillMaxWidth().menuAnchor()
-                              )
-                              ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                  voices.forEach { (key, label) ->
-                                      DropdownMenuItem(text = { Text(label) }, onClick = {
-                                          selectedVoice = key
-                                          viewModel.setVoice(key)
-                                          expanded = false
-                                      })
-                                  }
-                              }
-                          }
-                      }}
-
-                      // 3. 性格倾向
-                      Card { Column(modifier = Modifier.padding(16.dp)) {
-                          Text("性格倾向", style = MaterialTheme.typography.titleMedium)
-                          Spacer(modifier = Modifier.height(8.dp))
-                          val personalities = listOf("活泼", "沉稳", "温柔")
-                          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                              personalities.forEach { p ->
-                                  FilterChip(
-                                      selected = selectedPersonality == p,
-                                      onClick = { selectedPersonality = p; viewModel.setPersonality(p) },
-                                      label = { Text(p) }
-                                  )
-                              }
-                          }
-                      }}
-
-                      // 4. 关系类型
-                      Card { Column(modifier = Modifier.padding(16.dp)) {
-                          Text("关系类型", style = MaterialTheme.typography.titleMedium)
-                          Spacer(modifier = Modifier.height(8.dp))
-                          val relations = listOf("朋友", "挚友", "恋人")
-                          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                              relations.forEach { r ->
-                                  FilterChip(
-                                      selected = selectedRelation == r,
-                                      onClick = { selectedRelation = r; viewModel.setRelation(r) },
-                                      label = { Text(r) }
-                                  )
-                              }
-                          }
-                      }}
-                  }
-              }
-          }
-          EOF
-
-      # 2. 修改 MainActivity（增加设置入口 + 修复按住说话）
-      - run: |
-          cat > app/src/main/java/com/example/stellae/MainActivity.kt << 'EOF'
+          cat > app/src/main/java/com/example/stellae/SpeechManager.kt << 'EOF'
           package com.example.stellae
 
-          import android.Manifest
+          import android.content.Context
+          import android.content.Intent
+          import android.media.MediaPlayer
           import android.os.Bundle
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.setContent
-          import androidx.activity.compose.rememberLauncherForActivityResult
-          import androidx.activity.result.contract.ActivityResultContracts
-          import androidx.compose.foundation.Image
-          import androidx.compose.foundation.background
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.lazy.LazyColumn
-          import androidx.compose.foundation.lazy.items
-          import androidx.compose.foundation.lazy.rememberLazyListState
-          import androidx.compose.foundation.shape.CircleShape
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.foundation.text.KeyboardActions
-          import androidx.compose.foundation.text.KeyboardOptions
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.*
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.graphics.asImageBitmap
-          import androidx.compose.foundation.gestures.awaitEachGesture
-          import androidx.compose.foundation.gestures.awaitFirstDown
-          import androidx.compose.ui.input.pointer.pointerInput
-          import androidx.compose.foundation.gestures.waitForUpOrCancellation
-          import androidx.compose.ui.text.input.ImeAction
-          import androidx.compose.ui.unit.dp
-          import androidx.compose.ui.unit.sp
-          import androidx.lifecycle.viewmodel.compose.viewModel
-          import com.google.accompanist.permissions.ExperimentalPermissionsApi
-          import com.google.accompanist.permissions.isGranted
-          import com.google.accompanist.permissions.rememberPermissionState
-          import com.example.stellae.ui.settings.SettingsScreen
-          import kotlinx.coroutines.launch
+          import android.speech.RecognitionListener
+          import android.speech.RecognizerIntent
+          import android.speech.SpeechRecognizer
+          import android.speech.tts.TextToSpeech
+          import android.util.Log
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import okhttp3.Request
+          import java.io.File
+          import java.io.FileOutputStream
+          import java.util.Locale
 
-          class MainActivity : ComponentActivity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContent { ChatScreen() }
-              }
-          }
-
-          @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
-          @Composable
-          fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
-              val messages by viewModel.messages.collectAsState()
-              val isRecording by viewModel.isRecording.collectAsState()
-              val isProcessing by viewModel.isProcessing.collectAsState()
-              val currentEmotion by viewModel.currentEmotion.collectAsState()
-              val relationshipStage by viewModel.relationshipStage.collectAsState()
-              val companionName by viewModel.companionName.collectAsState()
-              val listState = rememberLazyListState()
-              var inputText by remember { mutableStateOf("") }
-              val scope = rememberCoroutineScope()
-              var showSettings by remember { mutableStateOf(false) }
-
-              val recordAudioPermissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
-              val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
-
-              val cameraLauncher = rememberLauncherForActivityResult(
-                  ActivityResultContracts.TakePicturePreview()
-              ) { bitmap ->
-                  if (bitmap != null) {
-                      viewModel.sendMessage("\u4f60\u770b\u770b\u8fd9\u4e2a", bitmap)
-                  }
-              }
-
-              LaunchedEffect(messages.size) {
-                  if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
-              }
-
-              if (showSettings) {
-                  SettingsScreen(onBack = { showSettings = false }, viewModel = viewModel)
-              } else {
-                  Scaffold(
-                      topBar = {
-                          TopAppBar(
-                              title = {
-                                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                      Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF8B5CF6)), contentAlignment = Alignment.Center) {
-                                          Text(companionName.take(1), color = Color.White, fontSize = 18.sp)
-                                      }
-                                      Column {
-                                          Text(companionName, fontSize = 16.sp)
-                                          Row(verticalAlignment = Alignment.CenterVertically) {
-                                              Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF4ADE80)))
-                                              Spacer(modifier = Modifier.width(4.dp))
-                                              Text(if (isProcessing) "\u601d\u8003\u4e2d..." else "\u5728\u7ebf", fontSize = 12.sp, color = Color.Gray)
-                                              Spacer(modifier = Modifier.width(8.dp))
-                                              Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFE8F5E9)) {
-                                                  Text(currentEmotion, fontSize = 10.sp, color = Color(0xFF2E7D32), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-                                              }
-                                              Spacer(modifier = Modifier.width(4.dp))
-                                              Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFFFF3E0)) {
-                                                  Text(relationshipStage, fontSize = 10.sp, color = Color(0xFFE65100), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-                                              }
-                                          }
-                                      }
-                                  }
-                              },
-                              actions = {
-                                  IconButton(onClick = { showSettings = true }) {
-                                      Icon(Icons.Default.Settings, null)
-                                  }
-                              }
-                          )
-                      }
-                  ) { padding ->
-                      Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-                          if (isProcessing) {
-                              Surface(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(12.dp), tonalElevation = 4.dp) {
-                                  Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                      CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                      Spacer(modifier = Modifier.width(8.dp))
-                                      Text("${companionName}\u6b63\u5728\u601d\u8003...", fontSize = 12.sp, color = Color.Gray)
-                                  }
-                              }
-                          }
-
-                          LazyColumn(
-                              state = listState,
-                              modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
-                              verticalArrangement = Arrangement.spacedBy(12.dp),
-                              contentPadding = PaddingValues(vertical = 16.dp)
-                          ) {
-                              items(messages) { msg -> ChatBubble(msg) }
-                          }
-
-                          Surface(tonalElevation = 2.dp) {
-                              Row(
-                                  modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                  verticalAlignment = Alignment.CenterVertically,
-                                  horizontalArrangement = Arrangement.spacedBy(8.dp)
-                              ) {
-                                  IconButton(
-                                      onClick = {
-                                          if (cameraPermissionState.status.isGranted) {
-                                              cameraLauncher.launch(null)
-                                          } else {
-                                              cameraPermissionState.launchPermissionRequest()
-                                          }
-                                      },
-                                      modifier = Modifier.size(44.dp)
-                                  ) {
-                                      Icon(Icons.Default.CameraAlt, null, tint = Color(0xFF1C1C1E))
-                                  }
-
-                                  OutlinedTextField(
-                                      value = inputText,
-                                      onValueChange = { inputText = it },
-                                      modifier = Modifier.weight(1f),
-                                      placeholder = { Text("\u8f93\u5165\u6d88\u606f...") },
-                                      shape = RoundedCornerShape(24.dp),
-                                      singleLine = true,
-                                      keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                      keyboardActions = KeyboardActions(onSend = {
-                                          if (inputText.isNotBlank()) {
-                                              viewModel.sendMessage(inputText)
-                                              inputText = ""
-                                          }
-                                      })
-                                  )
-
-                                  // 按住说话 + 发送按钮（修复）
-                                  Box(
-                                      modifier = Modifier
-                                          .size(48.dp)
-                                          .clip(CircleShape)
-                                          .background(
-                                              when {
-                                                  isRecording -> Color(0xFFEF5350)
-                                                  inputText.isNotBlank() -> Color(0xFF1C1C1E)
-                                                  else -> Color(0xFF1C1C1E)
-                                              }
-                                          )
-                                          .pointerInput(Unit) {
-                                              awaitEachGesture {
-                                                  val down = awaitFirstDown()
-                                                  // 如果输入框有文字，则不启动录音，直接发送
-                                                  if (inputText.isBlank()) {
-                                                      if (recordAudioPermissionState.status.isGranted) {
-                                                          viewModel.startRecording()
-                                                      } else {
-                                                          recordAudioPermissionState.launchPermissionRequest()
-                                                      }
-                                                  }
-                                                  val up = waitForUpOrCancellation()
-                                                  if (inputText.isBlank() && up != null) {
-                                                      viewModel.stopRecording()
-                                                  } else if (inputText.isNotBlank() && up != null) {
-                                                      viewModel.sendMessage(inputText)
-                                                      inputText = ""
-                                                  }
-                                              }
-                                          },
-                                      contentAlignment = Alignment.Center
-                                  ) {
-                                      Icon(
-                                          imageVector = if (inputText.isNotBlank()) Icons.Default.Send else Icons.Default.Mic,
-                                          contentDescription = null,
-                                          tint = Color.White,
-                                          modifier = Modifier.size(20.dp)
-                                      )
-                                  }
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-
-          @Composable
-          fun ChatBubble(message: ChatMessage) {
-              val isUser = message.isUser
-              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
-                  Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
-                      message.imageBase64?.let { base64 ->
-                          val imageBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-                          val bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-                          bitmap?.let {
-                              Image(
-                                  bitmap = it.asImageBitmap(),
-                                  contentDescription = null,
-                                  modifier = Modifier
-                                      .sizeIn(maxWidth = 200.dp, maxHeight = 200.dp)
-                                      .clip(RoundedCornerShape(12.dp))
-                              )
-                              Spacer(modifier = Modifier.height(4.dp))
-                          }
-                      }
-
-                      Surface(
-                          shape = RoundedCornerShape(
-                              topStart = 16.dp, topEnd = 16.dp,
-                              bottomStart = if (isUser) 16.dp else 4.dp,
-                              bottomEnd = if (isUser) 4.dp else 16.dp
-                          ),
-                          color = if (isUser) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
-                      ) {
-                          Column(modifier = Modifier.padding(12.dp)) {
-                              Text(message.content, color = if (isUser) Color.White else Color.Black, fontSize = 14.sp, lineHeight = 20.sp)
-                              message.taskLabel?.let {
-                                  Spacer(modifier = Modifier.height(6.dp))
-                                  Surface(shape = RoundedCornerShape(6.dp), color = if (isUser) Color(0x33FFFFFF) else Color(0x1F6750A4)) {
-                                      Text(it, fontSize = 10.sp, color = if (isUser) Color(0xFFE0E0E0) else Color(0xFF6750A4), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-                                  }
-                              }
-                              message.memoryHint?.let {
-                                  Spacer(modifier = Modifier.height(4.dp))
-                                  Text(it, fontSize = 10.sp, color = if (isUser) Color(0xB3FFFFFF) else Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-          EOF
-
-      # 3. 修改 ChatViewModel（添加设置方法 + 优化历史长度）
-      - run: |
-          cat > app/src/main/java/com/example/stellae/ChatViewModel.kt << 'EOF'
-          package com.example.stellae
-
-          import android.app.Application
-          import android.graphics.Bitmap
-          import androidx.lifecycle.AndroidViewModel
-          import androidx.lifecycle.viewModelScope
-          import com.example.stellae.core.*
-          import kotlinx.coroutines.delay
-          import kotlinx.coroutines.flow.MutableStateFlow
-          import kotlinx.coroutines.flow.StateFlow
-          import kotlinx.coroutines.flow.asStateFlow
-          import kotlinx.coroutines.launch
-          import kotlinx.coroutines.runBlocking
-
-          class ChatViewModel(application: Application) : AndroidViewModel(application) {
-              private val aiRepository = AIRepository(application)
-              private val memoryManager = MemoryManager(application)
-              private val speechManager = SpeechManager(application)
-              private val memoryDecayEngine = MemoryDecayEngine()
-              private val emotionEngine = EmotionEngine()
-              private val openLoopManager = OpenLoopManager(application)
-              private val proactiveEngine = ProactiveMessageEngine()
-              private val relationshipArc = RelationshipArc(emotionEngine)
-              private val companionLife = CompanionLife()
-
-              private val _messages = MutableStateFlow(listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f\u661f\u9ece\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210")))
-              val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
-              private val _isRecording = MutableStateFlow(false)
-              val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
-              private val _isProcessing = MutableStateFlow(false)
-              val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
-              private val _currentEmotion = MutableStateFlow("\u6e29\u67d4")
-              val currentEmotion: StateFlow<String> = _currentEmotion.asStateFlow()
-              private val _relationshipStage = MutableStateFlow("\u666e\u901a")
-              val relationshipStage: StateFlow<String> = _relationshipStage.asStateFlow()
-              private val _companionStatus = MutableStateFlow("\u5728\u770b\u4e66")
-              val companionStatus: StateFlow<String> = _companionStatus.asStateFlow()
-              private val _companionName = MutableStateFlow("\u661f\u9ece")
-              val companionName: StateFlow<String> = _companionName.asStateFlow()
-              private var sessionStartTime = System.currentTimeMillis()
+          class SpeechManager(private val context: Context) {
+              private var speechRecognizer: SpeechRecognizer? = null
+              private var textToSpeech: TextToSpeech? = null
+              private var mediaPlayer: MediaPlayer? = null
+              private var onResultCallback: ((String) -> Unit)? = null
+              private var isTtsReady = false
+              private val client = okhttp3.OkHttpClient.Builder()
+                  .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                  .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                  .build()
 
               init {
-                  viewModelScope.launch {
-                      val savedName = memoryManager.getCompanionName()
-                      _companionName.value = savedName
-                      _messages.value = listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f${savedName}\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210"))
-                  }
-                  startEmotionTicker()
-                  startOpenLoopChecker()
-                  startProactiveChecker()
-              }
-
-              // 新增设置方法
-              fun setCompanionName(name: String) {
-                  viewModelScope.launch {
-                      memoryManager.setCompanionName(name)
-                      _companionName.value = name
-                      _messages.value = _messages.value + ChatMessage("\u597d\u7684\uff0c\u4ee5\u540e\u53eb\u6211 $name \u5427", false, "\u8bbe\u7f6e\u66f4\u65b0")
-                  }
-              }
-
-              fun getSelectedVoice(): String {
-                  return runBlocking { memoryManager.getSetting("voice") ?: "zh-CN-XiaoxiaoNeural" }
-              }
-              fun setVoice(voice: String) { viewModelScope.launch { memoryManager.setSetting("voice", voice) } }
-
-              fun getPersonality(): String {
-                  return runBlocking { memoryManager.getSetting("personality") ?: "\u6e29\u67d4" }
-              }
-              fun setPersonality(p: String) { viewModelScope.launch { memoryManager.setSetting("personality", p) } }
-
-              fun getRelation(): String {
-                  return runBlocking { memoryManager.getSetting("relation") ?: "\u670b\u53cb" }
-              }
-              fun setRelation(r: String) { viewModelScope.launch { memoryManager.setSetting("relation", r) } }
-
-              fun sendMessage(text: String, imageBitmap: Bitmap? = null) {
-                  viewModelScope.launch {
-                      val lifeState = companionLife.getCurrentState()
-                      if (!lifeState.available) {
-                          _messages.value = _messages.value + ChatMessage(lifeState.description, false, "\u5979\u7761\u4e86")
-                          return@launch
-                      }
-                      if (checkAntiAddiction()) {
-                          _messages.value = _messages.value + ChatMessage(proactiveEngine.generateAntiAddictionReminder(), false, "\u5065\u5eb7\u63d0\u9192")
-                          return@launch
-                      }
-
-                      val newName = aiRepository.extractNameChange(text)
-                      if (newName != null && newName.length <= 6) {
-                          memoryManager.setCompanionName(newName)
-                          _companionName.value = newName
-                          _messages.value = _messages.value + ChatMessage(text, true) + ChatMessage("\u597d\u5440\uff5e\u90a3\u4ee5\u540e\u4f60\u5c31\u53eb\u6211${newName}\u5427\uff0c\u6211\u5f88\u559c\u6b22\u8fd9\u4e2a\u540d\u5b57", false, "\u6539\u540d\u6210\u529f")
-                          speechManager.speak("\u597d\u5440\uff5e\u90a3\u4ee5\u540e\u4f60\u5c31\u53eb\u6211${newName}\u5427\uff0c\u6211\u5f88\u559c\u6b22\u8fd9\u4e2a\u540d\u5b57", newName, getSelectedVoice())
-                          return@launch
-                      }
-
-                      val imageBase64 = imageBitmap?.let { AIRepository.bitmapToBase64(it) }
-                      _messages.value = _messages.value + ChatMessage(text, true, imageBase64 = imageBase64)
-
-                      val conflictResponse = relationshipArc.generateConflictResponse(text)
-                      if (conflictResponse != null) {
-                          handleConflictResponse(conflictResponse, text)
-                          return@launch
-                      }
-                      processWithXiyuAI(text, imageBase64)
-                  }
-              }
-
-              fun startRecording() {
-                  _isRecording.value = true
-                  speechManager.startListening { recognizedText ->
-                      viewModelScope.launch {
-                          _isRecording.value = false
-                          if (recognizedText.isNotBlank()) sendMessage(recognizedText)
-                      }
-                  }
-              }
-
-              fun stopRecording() {
-                  _isRecording.value = false
-                  speechManager.stopListening()
-              }
-
-              private suspend fun processWithXiyuAI(userInput: String, imageBase64: String? = null) {
-                  _isProcessing.value = true
-                  val newLoops = openLoopManager.extractOpenLoops(userInput)
-                  val event = emotionEngine.inferEventFromText(userInput)
-                  event?.let { emotionEngine.processEvent(it) }
-                  val emotionLabel = emotionEngine.getEmotionLabel()
-                  _currentEmotion.value = emotionLabel
-
-                  val allMemories = memoryManager.retrieveAllMemories()
-                  val rankedMemories = memoryDecayEngine.rankMemories(allMemories)
-                  val recallableMemories = rankedMemories.filter { it.freshness >= 0.15 }.take(3)
-
-                  val taskType = aiRepository.routeTask(userInput)
-                  if (event?.type == EventType.USER_APOLOGY) {
-                      relationshipArc.onApology(userInput)
-                  }
-
-                  val currentName = _companionName.value
-                  val personality = memoryManager.getSetting("personality") ?: "\u6e29\u67d4"
-                  val relation = memoryManager.getSetting("relation") ?: "\u670b\u53cb"
-                  val response = aiRepository.generateResponseWithEmotion(
-                      userInput, emotionLabel, emotionEngine,
-                      recallableMemories.map { MemoryEntry(it.memory.content, it.memory.category, it.memory.timestamp) },
-                      emotionEngine.getRelationshipStage(), _messages.value, companionLife, currentName, imageBase64,
-                      personality = personality,
-                      relation = relation
-                  )
-
-                  _messages.value = _messages.value + response
-                  _isProcessing.value = false
-                  speechManager.speak(response.content, currentName, getSelectedVoice())
-                  memoryManager.saveInteraction(userInput, response.content, emotionLabel)
-                  companionLife.updateEnergy(1)
-                  recallableMemories.forEach { memoryManager.updateMemory(memoryDecayEngine.refreshMemoryOnRecall(it.memory)) }
-
-                  _relationshipStage.value = when (emotionEngine.getRelationshipStage()) {
-                      RelationshipStage.STRANGER -> "\u964c\u751f"
-                      RelationshipStage.NORMAL -> "\u666e\u901a"
-                      RelationshipStage.FAMILIAR -> "\u719f\u6089"
-                      RelationshipStage.CLOSE -> "\u4eb2\u5bc6"
-                      RelationshipStage.CONFLICT -> "\u51b2\u7a81\u4e2d"
-                      RelationshipStage.RECONCILING -> "\u548c\u597d\u4e2d"
-                  }
-                  _companionStatus.value = companionLife.getCurrentState().description
-              }
-
-              private suspend fun handleConflictResponse(response: String, userInput: String) {
-                  _isProcessing.value = true
-                  delay(800)
-                  _messages.value = _messages.value + ChatMessage(response, false, "\u51b2\u7a81\u5f27: ${relationshipArc.getConflictStatus()}")
-                  speechManager.speak(response, _companionName.value, getSelectedVoice())
-                  _isProcessing.value = false
-                  _relationshipStage.value = "\u51b2\u7a81\u4e2d"
-              }
-
-              private fun startOpenLoopChecker() {
-                  viewModelScope.launch {
-                      while (true) {
-                          delay(60 * 1000L)
-                          openLoopManager.checkDueLoops().forEach { loop ->
-                              val followUp = openLoopManager.generateFollowUpMessage(loop)
-                              _messages.value = _messages.value + ChatMessage(followUp, false, "\u5f00\u73af\u8ddf\u8fdb")
-                              speechManager.speak(followUp, _companionName.value, getSelectedVoice())
-                          }
-                          openLoopManager.cleanupOldLoops()
-                      }
-                  }
-              }
-
-              private fun startProactiveChecker() {
-                  viewModelScope.launch {
-                      while (true) {
-                          delay(5 * 60 * 1000L)
-                          val lastMessage = _messages.value.lastOrNull() ?: continue
-                          val lastInteractionMinutes = (System.currentTimeMillis() - lastMessage.timestamp) / (1000 * 60)
-                          proactiveEngine.generateProactiveMessage(emotionEngine.getAffinityScore(), lastInteractionMinutes)?.let { msg ->
-                              _messages.value = _messages.value + ChatMessage(msg.content, false, "\u4e3b\u52a8\u5206\u4eab: ${msg.category}")
-                              speechManager.speak(msg.content, _companionName.value, getSelectedVoice())
+                  textToSpeech = TextToSpeech(context) { status ->
+                      if (status == TextToSpeech.SUCCESS) {
+                          textToSpeech?.apply {
+                              language = Locale.CHINESE
+                              setPitch(1.15f)
+                              setSpeechRate(0.92f)
+                              isTtsReady = true
                           }
                       }
                   }
               }
 
-              private fun startEmotionTicker() {
-                  viewModelScope.launch {
-                      while (true) {
-                          delay(5 * 60 * 1000L)
-                          emotionEngine.tick(5.0)
-                          _currentEmotion.value = emotionEngine.getEmotionLabel()
-                          if (relationshipArc.checkAutoReconcile()) {
-                              emotionEngine.processEvent(EmotionalEvent(EventType.AI_GOAL_ACHIEVED, 3.0))
-                              _relationshipStage.value = "\u666e\u901a"
+              fun startListening(onResult: (String) -> Unit) {
+                  onResultCallback = onResult
+                  if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                      speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                          setRecognitionListener(object : RecognitionListener {
+                              override fun onReadyForSpeech(params: Bundle?) {}
+                              override fun onBeginningOfSpeech() {}
+                              override fun onRmsChanged(rmsdB: Float) {}
+                              override fun onBufferReceived(buffer: ByteArray?) {}
+                              override fun onEndOfSpeech() {}
+                              override fun onError(error: Int) { onResultCallback?.invoke(""); Log.e("Speech", "Error: $error") }
+                              override fun onResults(results: Bundle?) {
+                                  onResultCallback?.invoke(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: "")
+                              }
+                              override fun onPartialResults(partialResults: Bundle?) {}
+                              override fun onEvent(eventType: Int, params: Bundle?) {}
+                          })
+                      }
+                      val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                          putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                          putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.CHINESE.toString())
+                          putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                      }
+                      speechRecognizer?.startListening(intent)
+                  } else {
+                      onResultCallback?.invoke("")
+                  }
+              }
+
+              fun stopListening() {
+                  speechRecognizer?.stopListening()
+                  speechRecognizer?.destroy()
+                  speechRecognizer = null
+              }
+
+              suspend fun speak(text: String, companionName: String = "\u661f\u9ece", voice: String = "zh-CN-XiaoxiaoNeural") {
+                  val cleanText = text
+                      .replace(Regex("[\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\uFE00-\uFE0F]"), "")
+                      .replace(Regex("\u4efb\u52a1\u5206\u914d:.+"), "")
+                      .replace(Regex("\u8bb0\u5fc6\u89e6\u53d1:.+"), "")
+                      .trim()
+
+                  if (cleanText.isEmpty()) return
+
+                  val success = tryEdgeTts(cleanText, voice)
+                  if (!success && isTtsReady) {
+                      textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, null)
+                  }
+              }
+
+              // 试听专用方法：不清理任务标签
+              suspend fun previewVoice(voice: String, onComplete: (() -> Unit)? = null) {
+                  val text = "\u8fd9\u662f\u4e00\u6bb5\u8bd5\u542c\u8bed\u97f3\uff0c\u4f60\u89c9\u5f97\u8fd9\u4e2a\u97f3\u8272\u600e\u4e48\u6837\uff1f"
+                  tryEdgeTts(text, voice, onComplete)
+              }
+
+              private suspend fun tryEdgeTts(text: String, voice: String, onComplete: (() -> Unit)? = null): Boolean {
+                  return withContext(Dispatchers.IO) {
+                      try {
+                          val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
+                          val url = "https://tts.kina.ink/tts?text=$encodedText&voice=$voice&rate=%2B10%"
+                          val request = Request.Builder().url(url).build()
+                          val response = client.newCall(request).execute()
+                          if (!response.isSuccessful) return@withContext false
+
+                          val audioData = response.body?.bytes() ?: return@withContext false
+                          val tempFile = File(context.cacheDir, "edge_tts_${System.currentTimeMillis()}.mp3")
+                          FileOutputStream(tempFile).use { it.write(audioData) }
+
+                          withContext(Dispatchers.Main) {
+                              mediaPlayer?.release()
+                              mediaPlayer = MediaPlayer().apply {
+                                  setDataSource(tempFile.absolutePath)
+                                  prepare()
+                                  start()
+                                  setOnCompletionListener {
+                                      release()
+                                      tempFile.delete()
+                                      onComplete?.invoke()
+                                  }
+                              }
                           }
-                          companionLife.rest(5)
-                          _companionStatus.value = companionLife.getCurrentState().description
+                          true
+                      } catch (e: Exception) {
+                          Log.e("EdgeTTS", "Failed: ${e.message}")
+                          false
                       }
                   }
               }
 
-              private fun checkAntiAddiction(): Boolean {
-                  return (System.currentTimeMillis() - sessionStartTime) / (1000 * 60) > 120
+              fun stopSpeaking() {
+                  mediaPlayer?.stop()
+                  mediaPlayer?.release()
+                  mediaPlayer = null
+                  textToSpeech?.stop()
+              }
+
+              fun shutdown() {
+                  textToSpeech?.shutdown()
+                  speechRecognizer?.destroy()
+                  mediaPlayer?.release()
               }
           }
           EOF
 
-      # 4. 修改 AIRepository（增加性格/关系参数，优化历史消息为3条）
+      # 6. MemoryManager（含 get/set 设置）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/MemoryManager.kt << 'EOF'
+          package com.example.stellae
+
+          import android.content.Context
+          import com.example.stellae.data.AppDatabase
+          import com.example.stellae.data.MemoryEntity
+          import com.example.stellae.data.SettingsEntity
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+
+          class MemoryManager(context: Context) {
+              private val dao = AppDatabase.getDatabase(context).memoryDao()
+              private val settingsDao = AppDatabase.getDatabase(context).settingsDao()
+
+              suspend fun getCompanionName(): String {
+                  return withContext(Dispatchers.IO) {
+                      settingsDao.getValue("companion_name") ?: "\u661f\u9ece"
+                  }
+              }
+
+              suspend fun setCompanionName(name: String) {
+                  withContext(Dispatchers.IO) {
+                      val existing = settingsDao.getValue("companion_name")
+                      if (existing == null) {
+                          settingsDao.insert(SettingsEntity("companion_name", name))
+                      } else {
+                          settingsDao.update(SettingsEntity("companion_name", name))
+                      }
+                  }
+              }
+
+              suspend fun getSetting(key: String): String? {
+                  return withContext(Dispatchers.IO) { settingsDao.getValue(key) }
+              }
+
+              suspend fun setSetting(key: String, value: String) {
+                  withContext(Dispatchers.IO) {
+                      val existing = settingsDao.getValue(key)
+                      if (existing == null) {
+                          settingsDao.insert(SettingsEntity(key, value))
+                      } else {
+                          settingsDao.update(SettingsEntity(key, value))
+                      }
+                  }
+              }
+
+              suspend fun saveInteraction(userInput: String, aiResponse: String, emotion: String) {
+                  withContext(Dispatchers.IO) {
+                      extractMemories(userInput, emotion).forEach { dao.insert(it) }
+                  }
+              }
+
+              suspend fun retrieveRelevantMemories(query: String): List<MemoryEntry> {
+                  return withContext(Dispatchers.IO) {
+                      val keywords = extractKeywords(query)
+                      val results = mutableListOf<MemoryEntity>()
+                      keywords.forEach { results.addAll(dao.searchMemories(it)) }
+                      results.distinctBy { it.id }.take(5).map { MemoryEntry(it.content, it.category, it.timestamp) }
+                  }
+              }
+
+              suspend fun retrieveAllMemories(): List<MemoryEntity> {
+                  return withContext(Dispatchers.IO) { dao.getAllMemories() }
+              }
+
+              suspend fun updateMemory(memory: MemoryEntity) {
+                  withContext(Dispatchers.IO) {
+                      dao.delete(memory)
+                      dao.insert(memory)
+                  }
+              }
+
+              private fun extractMemories(input: String, emotion: String): List<MemoryEntity> {
+                  val memories = mutableListOf<MemoryEntity>()
+                  val lower = input.lowercase()
+                  if (emotion in listOf("\u5fc3\u75bc", "\u5173\u5fc3", "\u5b89\u629a")) {
+                      memories.add(MemoryEntity(content = "\u7528\u6237\u66fe\u8868\u8fbe\u8fc7\u60c5\u7eea\u56f0\u6270\uff0c\u9700\u8981\u6e29\u67d4\u5bf9\u5f85", category = "emotion", importance = 5))
+                  }
+                  if (lower.contains("\u559c\u6b22") || lower.contains("\u7231")) {
+                      val thing = extractPreference(input)
+                      if (thing.isNotEmpty()) memories.add(MemoryEntity(content = "\u7528\u6237\u559c\u6b22: $thing", category = "preference", importance = 3))
+                  }
+                  if (lower.contains("\u751f\u65e5") || lower.contains("\u8003\u8bd5") || lower.contains("\u9762\u8bd5")) {
+                      memories.add(MemoryEntity(content = "\u7528\u6237\u63d0\u53ca: ${input.take(50)}", category = "event", importance = 4))
+                  }
+                  return memories
+              }
+
+              private fun extractKeywords(query: String): List<String> {
+                  val stopWords = setOf("\u7684", "\u4e86", "\u662f", "\u6211", "\u4f60", "\u5417", "\u5462", "\u5427", "\u554a", "\u4eca\u5929", "\u660e\u5929")
+                  return query.split(" ", "\uff0c", "\u3002", "\uff1f", "\uff01").flatMap { it.toList().map { c -> c.toString() } }.filter { it !in stopWords }.distinct().take(5)
+              }
+
+              private fun extractPreference(input: String): String {
+                  listOf("\u559c\u6b22(.+?)[\uff0c\u3002]", "\u7231(.+?)[\uff0c\u3002]", "\u6700\u7231(.+?)[\uff0c\u3002]").forEach { pattern ->
+                      Regex(pattern).find(input)?.let { return it.groupValues[1] }
+                  }
+                  return ""
+              }
+          }
+
+          data class MemoryEntry(val content: String, val category: String, val timestamp: Long)
+          EOF
+
+      # 7. AIRepository（云端优化 + 位置上下文）
       - run: |
           cat > app/src/main/java/com/example/stellae/AIRepository.kt << 'EOF'
           package com.example.stellae
@@ -1331,11 +975,14 @@ jobs:
           class AIRepository(private val context: Context) {
               private val gson = Gson()
               private val client = OkHttpClient.Builder()
-                  .connectTimeout(8, TimeUnit.SECONDS)   // 缩短超时
-                  .readTimeout(10, TimeUnit.SECONDS)
+                  .connectTimeout(5, TimeUnit.SECONDS)   // 缩短超时
+                  .readTimeout(8, TimeUnit.SECONDS)
                   .build()
               private val API_KEY = "ark-cc51dab3-1c7e-4f20-9764-45ec3dfa2586-2d686"
               private val BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+
+              // 位置信息（由ViewModel注入）
+              var currentLocation: LocationInfo? = null
 
               fun routeTask(input: String): TaskType {
                   val lower = input.lowercase()
@@ -1345,6 +992,10 @@ jobs:
                       lower.contains("\u96be\u8fc7") || lower.contains("\u4e0d\u5f00\u5fc3") || lower.contains("\u7d2f") || lower.contains("\u538b\u529b") -> TaskType.EMOTIONAL_SUPPORT
                       lower.contains("\u66ff\u4ee3") || lower.contains("\u5973\u670b\u53cb") || lower.contains("\u771f\u5b9e") -> TaskType.BOUNDARY
                       lower.contains("\u5bf9\u4e0d\u8d77") || lower.contains("\u62b1\u6b49") || lower.contains("\u6211\u9519\u4e86") -> TaskType.APOLOGY
+                      // 定位相关关键词
+                      lower.contains("\u5403\u4ec0\u4e48") || lower.contains("\u597d\u5403") || lower.contains("\u9910\u5385") || lower.contains("\u7f8e\u98df") ||
+                      lower.contains("\u73a9\u7684") || lower.contains("\u666f\u70b9") || lower.contains("\u63a8\u8350") || lower.contains("\u9644\u8fd1") ||
+                      lower.contains("\u54ea\u91cc") || lower.contains("\u600e\u4e48\u53bb") -> TaskType.LOCATION
                       else -> TaskType.CHAT
                   }
               }
@@ -1372,7 +1023,8 @@ jobs:
                   companionName: String,
                   imageBase64: String? = null,
                   personality: String = "\u6e29\u67d4",
-                  relation: String = "\u670b\u53cb"
+                  relation: String = "\u670b\u53cb",
+                  location: LocationInfo? = null
               ): ChatMessage {
                   return withContext(Dispatchers.IO) {
                       val taskType = if (imageBase64 != null) TaskType.VISION else routeTask(userInput)
@@ -1380,7 +1032,7 @@ jobs:
                           companionName, emotionLabel, emotionState.getDominantEmotion(),
                           emotionState.getEmotionIntensity(emotionState.getDominantEmotion()),
                           emotionState.getAffinityScore(), relationshipStage, taskType, companionLife,
-                          personality, relation
+                          personality, relation, location
                       )
                       // 优化：只传递最近3条历史消息
                       val messages = buildMessageList(systemPrompt, conversationHistory.takeLast(3), userInput, memories, imageBase64)
@@ -1399,7 +1051,8 @@ jobs:
                   taskType: TaskType,
                   companionLife: CompanionLife,
                   personality: String,
-                  relation: String
+                  relation: String,
+                  location: LocationInfo?
               ): String {
                   val lifeState = companionLife.getCurrentState()
                   val energyDesc = companionLife.getEnergyDescription()
@@ -1423,6 +1076,19 @@ jobs:
                   sb.appendLine("- \u6709\u81ea\u5df1\u7684\u4e16\u754c\uff1a\u6b63\u5728\u8bfb${companionLife.getCurrentBook()}\uff0c\u6709\u81ea\u5df1\u7684\u65e5\u7a0b")
                   sb.appendLine("- \u751f\u6d3b\u4e0d\u56f4\u7740\u7528\u6237\u8f6c\uff0c\u6240\u4ee5\u966a\u4ed6\u65f6\u624d\u662f\u771f\u7684")
                   sb.appendLine()
+                  if (location != null) {
+                      sb.appendLine("\u3010\u7528\u6237\u5f53\u524d\u4f4d\u7f6e\u3011")
+                      sb.appendLine("- \u57ce\u5e02: ${location.city}")
+                      sb.appendLine("- \u533a\u57df: ${location.district}")
+                      sb.appendLine("- \u8be6\u7ec6\u5730\u5740: ${location.address}")
+                      sb.appendLine("- \u7ecf\u7eac\u5ea6: ${location.lat}, ${location.lon}")
+                      sb.appendLine()
+                      sb.appendLine("\u3010\u4f4d\u7f6e\u63a8\u8350\u6307\u4ee4\u3011")
+                      sb.appendLine("\u5982\u679c\u7528\u6237\u95ee\u53ca\u5403\u7684\u6216\u73a9\u7684\uff0c\u8bf7\u7ed3\u5408\u4f4d\u7f6e\u63d0\u4f9b\u6709\u7528\u7684\u63a8\u8350\u3002")
+                      sb.appendLine("\u4f60\u53ef\u4ee5\u8bf4\u201c\u6211\u67e5\u4e86\u4e00\u4e0b\uff0c\u9644\u8fd1\u6709XXX\u201d\uff0c\u7136\u540e\u7ed9\u51fa\u5177\u4f53\u540d\u79f0\u548c\u7b80\u8981\u63cf\u8ff0\u3002")
+                      sb.appendLine("\u5982\u679c\u4f60\u4e0d\u77e5\u9053\u5177\u4f53\u54ea\u5bb6\u5e97\uff0c\u53ef\u4ee5\u63d0\u4f9b\u7c7b\u522b\u5efa\u8bae\uff0c\u6bd4\u5982\u201c\u6211\u770b\u9644\u8fd1\u6709\u4e00\u7247\u9910\u996e\u533a\uff0c\u4f60\u53ef\u4ee5\u53bb\u63a2\u5e97\u201d\u3002")
+                      sb.appendLine()
+                  }
                   sb.appendLine("\u3010\u5f53\u524d\u72b6\u6001\u3011")
                   sb.appendLine("- \u60c5\u7eea: $emotionLabel (\u5f3a\u5ea6: ${String.format("%.1f", emotionIntensity)}/10)")
                   sb.appendLine("- \u80fd\u91cf: $energyDesc")
@@ -1470,6 +1136,7 @@ jobs:
                       TaskType.APOLOGY -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u5728\u9053\u6b49\u3002\u5982\u679c\u771f\u8bda\u5c31\u63a5\u53d7\uff0c\u5982\u679c\u6577\u884d\u5c31\u6307\u51fa\u3002\u4e0d\u8981\u7acb\u523b\u5b8c\u5168\u539f\u8c05\u3002"
                       TaskType.CHAT -> "[\u4efb\u52a1\u6307\u4ee4] \u81ea\u7531\u95f2\u804a\u3002\u53ef\u4ee5\u5206\u4eab\u81ea\u5df1\u7684\u72b6\u6001\u3002"
                       TaskType.VISION -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u53d1\u9001\u4e86\u56fe\u7247\u3002\u4ed4\u7ec6\u89c2\u5bdf\u56fe\u7247\u5185\u5bb9\uff0c\u63cf\u8ff0\u4f60\u770b\u5230\u7684\uff0c\u5e76\u56de\u5e94\u7528\u6237\u7684\u63d0\u95ee\u3002"
+                      TaskType.LOCATION -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u95ee\u53ca\u9644\u8fd1\u7684\u5403\u7684\u6216\u73a9\u7684\u3002\u7ed3\u5408\u4f4d\u7f6e\u4fe1\u606f\u63d0\u4f9b\u7c7b\u522b\u5efa\u8bae\u6216\u5177\u4f53\u540d\u79f0\u3002\u5982\u679c\u6ca1\u6709\u5b9e\u9645\u6570\u636e\uff0c\u53ef\u4ee5\u63d0\u4f9b\u5de5\u5177\u5efa\u8bae\u3002"
                   }
               }
 
@@ -1598,261 +1265,754 @@ jobs:
               EMOTIONAL_SUPPORT("\u60c5\u611f\u966a\u4f34", "\u60c5\u611f\u652f\u6301"),
               BOUNDARY("\u4ef7\u503c\u89c2\u56de\u7b54", "\u8fb9\u754c\u8ba8\u8bba"),
               APOLOGY("\u51b2\u7a81\u5f27: \u9053\u6b49\u5904\u7406", "\u9053\u6b49\u5904\u7406"),
-              VISION("\u89c6\u89c9\u5206\u6790", "\u56fe\u7247\u5206\u6790")
+              VISION("\u89c6\u89c9\u5206\u6790", "\u56fe\u7247\u5206\u6790"),
+              LOCATION("\u4f4d\u7f6e\u63a8\u8350", "\u9644\u8fd1\u7f8e\u98df/\u666f\u70b9")
           }
 
           data class ChatCompletionResponse(@SerializedName("choices") val choices: List<Choice>?)
           data class Choice(@SerializedName("message") val message: Message?)
           data class Message(@SerializedName("content") val content: String?)
+
+          data class LocationInfo(val city: String, val district: String, val address: String, val lat: Double, val lon: Double)
           EOF
 
-      # 5. 修改 SpeechManager（支持动态音色）
+      # 8. ChatViewModel（整合定位 + 试听 + 优化）
       - run: |
-          cat > app/src/main/java/com/example/stellae/SpeechManager.kt << 'EOF'
+          cat > app/src/main/java/com/example/stellae/ChatViewModel.kt << 'EOF'
           package com.example.stellae
 
-          import android.content.Context
-          import android.content.Intent
-          import android.media.MediaPlayer
-          import android.os.Bundle
-          import android.speech.RecognitionListener
-          import android.speech.RecognizerIntent
-          import android.speech.SpeechRecognizer
-          import android.speech.tts.TextToSpeech
-          import android.util.Log
-          import kotlinx.coroutines.Dispatchers
-          import kotlinx.coroutines.withContext
+          import android.Manifest
+          import android.app.Application
+          import android.content.pm.PackageManager
+          import android.graphics.Bitmap
+          import android.location.Location
+          import androidx.core.content.ContextCompat
+          import androidx.lifecycle.AndroidViewModel
+          import androidx.lifecycle.viewModelScope
+          import com.example.stellae.core.*
+          import com.google.android.gms.location.FusedLocationProviderClient
+          import com.google.android.gms.location.LocationServices
+          import kotlinx.coroutines.delay
+          import kotlinx.coroutines.flow.MutableStateFlow
+          import kotlinx.coroutines.flow.StateFlow
+          import kotlinx.coroutines.flow.asStateFlow
+          import kotlinx.coroutines.launch
+          import kotlinx.coroutines.runBlocking
+          import okhttp3.OkHttpClient
           import okhttp3.Request
-          import java.io.File
-          import java.io.FileOutputStream
-          import java.util.Locale
+          import com.google.gson.Gson
+          import java.io.IOException
 
-          class SpeechManager(private val context: Context) {
-              private var speechRecognizer: SpeechRecognizer? = null
-              private var textToSpeech: TextToSpeech? = null
-              private var mediaPlayer: MediaPlayer? = null
-              private var onResultCallback: ((String) -> Unit)? = null
-              private var isTtsReady = false
-              private val client = okhttp3.OkHttpClient.Builder()
-                  .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                  .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                  .build()
+          class ChatViewModel(application: Application) : AndroidViewModel(application) {
+              private val aiRepository = AIRepository(application)
+              private val memoryManager = MemoryManager(application)
+              private val speechManager = SpeechManager(application)
+              private val memoryDecayEngine = MemoryDecayEngine()
+              private val emotionEngine = EmotionEngine()
+              private val openLoopManager = OpenLoopManager(application)
+              private val proactiveEngine = ProactiveMessageEngine()
+              private val relationshipArc = RelationshipArc(emotionEngine)
+              private val companionLife = CompanionLife()
+              private val fusedLocationClient: FusedLocationProviderClient =
+                  LocationServices.getFusedLocationProviderClient(application)
+
+              private val _messages = MutableStateFlow(listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f\u661f\u9ece\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210")))
+              val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+              private val _isRecording = MutableStateFlow(false)
+              val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+              private val _isProcessing = MutableStateFlow(false)
+              val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+              private val _currentEmotion = MutableStateFlow("\u6e29\u67d4")
+              val currentEmotion: StateFlow<String> = _currentEmotion.asStateFlow()
+              private val _relationshipStage = MutableStateFlow("\u666e\u901a")
+              val relationshipStage: StateFlow<String> = _relationshipStage.asStateFlow()
+              private val _companionStatus = MutableStateFlow("\u5728\u770b\u4e66")
+              val companionStatus: StateFlow<String> = _companionStatus.asStateFlow()
+              private val _companionName = MutableStateFlow("\u661f\u9ece")
+              val companionName: StateFlow<String> = _companionName.asStateFlow()
+              private var sessionStartTime = System.currentTimeMillis()
+              private var currentLocation: LocationInfo? = null
+              private val httpClient = OkHttpClient.Builder().build()
+              private val gson = Gson()
 
               init {
-                  textToSpeech = TextToSpeech(context) { status ->
-                      if (status == TextToSpeech.SUCCESS) {
-                          textToSpeech?.apply {
-                              language = Locale.CHINESE
-                              setPitch(1.15f)
-                              setSpeechRate(0.92f)
-                              isTtsReady = true
+                  viewModelScope.launch {
+                      val savedName = memoryManager.getCompanionName()
+                      _companionName.value = savedName
+                      _messages.value = listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f${savedName}\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210"))
+                      // 启动时尝试获取位置
+                      fetchLocation()
+                  }
+                  startEmotionTicker()
+                  startOpenLoopChecker()
+                  startProactiveChecker()
+              }
+
+              // === 设置方法 ===
+              fun setCompanionName(name: String) {
+                  viewModelScope.launch {
+                      memoryManager.setCompanionName(name)
+                      _companionName.value = name
+                      _messages.value = _messages.value + ChatMessage("\u597d\u7684\uff0c\u4ee5\u540e\u53eb\u6211 $name \u5427", false, "\u8bbe\u7f6e\u66f4\u65b0")
+                  }
+              }
+
+              fun getSelectedVoice(): String {
+                  return runBlocking { memoryManager.getSetting("voice") ?: "zh-CN-XiaoxiaoNeural" }
+              }
+              fun setVoice(voice: String) { viewModelScope.launch { memoryManager.setSetting("voice", voice) } }
+
+              fun getPersonality(): String {
+                  return runBlocking { memoryManager.getSetting("personality") ?: "\u6e29\u67d4" }
+              }
+              fun setPersonality(p: String) { viewModelScope.launch { memoryManager.setSetting("personality", p) } }
+
+              fun getRelation(): String {
+                  return runBlocking { memoryManager.getSetting("relation") ?: "\u670b\u53cb" }
+              }
+              fun setRelation(r: String) { viewModelScope.launch { memoryManager.setSetting("relation", r) } }
+
+              // 音色试听
+              fun previewVoice(voice: String) {
+                  viewModelScope.launch { speechManager.previewVoice(voice) }
+              }
+
+              // 定位获取
+              private suspend fun fetchLocation() {
+                  try {
+                      if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION)
+                          != PackageManager.PERMISSION_GRANTED) {
+                          return
+                      }
+                      val location = fusedLocationClient.lastLocation.await()
+                      if (location != null) {
+                          currentLocation = reverseGeocode(location)
+                          aiRepository.currentLocation = currentLocation
+                      }
+                  } catch (e: Exception) { e.printStackTrace() }
+              }
+
+              private suspend fun reverseGeocode(location: Location): LocationInfo? {
+                  return withContext(kotlinx.coroutines.Dispatchers.IO) {
+                      try {
+                          val lat = location.latitude
+                          val lon = location.longitude
+                          // 使用Nominatim反向地理编码（免费，无需Key）
+                          val url = "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&addressdetails=1"
+                          val request = Request.Builder().url(url).header("User-Agent", "StellaeApp").build()
+                          val response = httpClient.newCall(request).execute()
+                          if (!response.isSuccessful) return@withContext null
+                          val json = response.body?.string() ?: return@withContext null
+                          val root = gson.fromJson(json, Map::class.java)
+                          val address = root["address"] as? Map<*, *> ?: return@withContext null
+                          val city = address["city"]?.toString()
+                              ?: address["town"]?.toString()
+                              ?: address["village"]?.toString()
+                              ?: address["county"]?.toString()
+                              ?: "未知城市"
+                          val district = address["suburb"]?.toString() ?: address["neighbourhood"]?.toString() ?: ""
+                          val fullAddress = (address["road"]?.toString() ?: "") + (address["house_number"]?.toString()?.let { " $it" } ?: "")
+                          return@withContext LocationInfo(
+                              city = city,
+                              district = district,
+                              address = fullAddress.ifEmpty { "附近" },
+                              lat = lat,
+                              lon = lon
+                          )
+                      } catch (e: Exception) { e.printStackTrace(); null }
+                  }
+              }
+
+              // 主动获取位置（供外部调用）
+              fun requestLocationUpdate() {
+                  viewModelScope.launch { fetchLocation() }
+              }
+
+              fun sendMessage(text: String, imageBitmap: Bitmap? = null) {
+                  viewModelScope.launch {
+                      val lifeState = companionLife.getCurrentState()
+                      if (!lifeState.available) {
+                          _messages.value = _messages.value + ChatMessage(lifeState.description, false, "\u5979\u7761\u4e86")
+                          return@launch
+                      }
+                      if (checkAntiAddiction()) {
+                          _messages.value = _messages.value + ChatMessage(proactiveEngine.generateAntiAddictionReminder(), false, "\u5065\u5eb7\u63d0\u9192")
+                          return@launch
+                      }
+
+                      // 检测改名
+                      val newName = aiRepository.extractNameChange(text)
+                      if (newName != null && newName.length <= 6) {
+                          memoryManager.setCompanionName(newName)
+                          _companionName.value = newName
+                          _messages.value = _messages.value + ChatMessage(text, true) + ChatMessage("\u597d\u5440\uff5e\u90a3\u4ee5\u540e\u4f60\u5c31\u53eb\u6211${newName}\u5427\uff0c\u6211\u5f88\u559c\u6b22\u8fd9\u4e2a\u540d\u5b57", false, "\u6539\u540d\u6210\u529f")
+                          speechManager.speak("\u597d\u5440\uff5e\u90a3\u4ee5\u540e\u4f60\u5c31\u53eb\u6211${newName}\u5427\uff0c\u6211\u5f88\u559c\u6b22\u8fd9\u4e2a\u540d\u5b57", newName, getSelectedVoice())
+                          return@launch
+                      }
+
+                      // 如果涉及位置关键词，先获取位置（如果还没有）
+                      if (aiRepository.routeTask(text) == TaskType.LOCATION && currentLocation == null) {
+                          fetchLocation()
+                      }
+
+                      val imageBase64 = imageBitmap?.let { AIRepository.bitmapToBase64(it) }
+                      _messages.value = _messages.value + ChatMessage(text, true, imageBase64 = imageBase64)
+
+                      val conflictResponse = relationshipArc.generateConflictResponse(text)
+                      if (conflictResponse != null) {
+                          handleConflictResponse(conflictResponse, text)
+                          return@launch
+                      }
+                      processWithXiyuAI(text, imageBase64)
+                  }
+              }
+
+              fun startRecording() {
+                  _isRecording.value = true
+                  speechManager.startListening { recognizedText ->
+                      viewModelScope.launch {
+                          _isRecording.value = false
+                          if (recognizedText.isNotBlank()) sendMessage(recognizedText)
+                      }
+                  }
+              }
+
+              fun stopRecording() {
+                  _isRecording.value = false
+                  speechManager.stopListening()
+              }
+
+              private suspend fun processWithXiyuAI(userInput: String, imageBase64: String? = null) {
+                  _isProcessing.value = true
+                  val newLoops = openLoopManager.extractOpenLoops(userInput)
+                  val event = emotionEngine.inferEventFromText(userInput)
+                  event?.let { emotionEngine.processEvent(it) }
+                  val emotionLabel = emotionEngine.getEmotionLabel()
+                  _currentEmotion.value = emotionLabel
+
+                  val allMemories = memoryManager.retrieveAllMemories()
+                  val rankedMemories = memoryDecayEngine.rankMemories(allMemories)
+                  val recallableMemories = rankedMemories.filter { it.freshness >= 0.15 }.take(3)
+
+                  val taskType = aiRepository.routeTask(userInput)
+                  if (event?.type == EventType.USER_APOLOGY) {
+                      relationshipArc.onApology(userInput)
+                  }
+
+                  val currentName = _companionName.value
+                  val personality = memoryManager.getSetting("personality") ?: "\u6e29\u67d4"
+                  val relation = memoryManager.getSetting("relation") ?: "\u670b\u53cb"
+                  val response = aiRepository.generateResponseWithEmotion(
+                      userInput, emotionLabel, emotionEngine,
+                      recallableMemories.map { MemoryEntry(it.memory.content, it.memory.category, it.memory.timestamp) },
+                      emotionEngine.getRelationshipStage(), _messages.value, companionLife, currentName, imageBase64,
+                      personality = personality,
+                      relation = relation,
+                      location = currentLocation
+                  )
+
+                  _messages.value = _messages.value + response
+                  _isProcessing.value = false
+                  speechManager.speak(response.content, currentName, getSelectedVoice())
+                  memoryManager.saveInteraction(userInput, response.content, emotionLabel)
+                  companionLife.updateEnergy(1)
+                  recallableMemories.forEach { memoryManager.updateMemory(memoryDecayEngine.refreshMemoryOnRecall(it.memory)) }
+
+                  _relationshipStage.value = when (emotionEngine.getRelationshipStage()) {
+                      RelationshipStage.STRANGER -> "\u964c\u751f"
+                      RelationshipStage.NORMAL -> "\u666e\u901a"
+                      RelationshipStage.FAMILIAR -> "\u719f\u6089"
+                      RelationshipStage.CLOSE -> "\u4eb2\u5bc6"
+                      RelationshipStage.CONFLICT -> "\u51b2\u7a81\u4e2d"
+                      RelationshipStage.RECONCILING -> "\u548c\u597d\u4e2d"
+                  }
+                  _companionStatus.value = companionLife.getCurrentState().description
+              }
+
+              private suspend fun handleConflictResponse(response: String, userInput: String) {
+                  _isProcessing.value = true
+                  delay(800)
+                  _messages.value = _messages.value + ChatMessage(response, false, "\u51b2\u7a81\u5f27: ${relationshipArc.getConflictStatus()}")
+                  speechManager.speak(response, _companionName.value, getSelectedVoice())
+                  _isProcessing.value = false
+                  _relationshipStage.value = "\u51b2\u7a81\u4e2d"
+              }
+
+              private fun startOpenLoopChecker() {
+                  viewModelScope.launch {
+                      while (true) {
+                          delay(60 * 1000L)
+                          openLoopManager.checkDueLoops().forEach { loop ->
+                              val followUp = openLoopManager.generateFollowUpMessage(loop)
+                              _messages.value = _messages.value + ChatMessage(followUp, false, "\u5f00\u73af\u8ddf\u8fdb")
+                              speechManager.speak(followUp, _companionName.value, getSelectedVoice())
+                          }
+                          openLoopManager.cleanupOldLoops()
+                      }
+                  }
+              }
+
+              private fun startProactiveChecker() {
+                  viewModelScope.launch {
+                      while (true) {
+                          delay(5 * 60 * 1000L)
+                          val lastMessage = _messages.value.lastOrNull() ?: continue
+                          val lastInteractionMinutes = (System.currentTimeMillis() - lastMessage.timestamp) / (1000 * 60)
+                          proactiveEngine.generateProactiveMessage(emotionEngine.getAffinityScore(), lastInteractionMinutes)?.let { msg ->
+                              _messages.value = _messages.value + ChatMessage(msg.content, false, "\u4e3b\u52a8\u5206\u4eab: ${msg.category}")
+                              speechManager.speak(msg.content, _companionName.value, getSelectedVoice())
                           }
                       }
                   }
               }
 
-              fun startListening(onResult: (String) -> Unit) {
-                  onResultCallback = onResult
-                  if (SpeechRecognizer.isRecognitionAvailable(context)) {
-                      speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-                          setRecognitionListener(object : RecognitionListener {
-                              override fun onReadyForSpeech(params: Bundle?) {}
-                              override fun onBeginningOfSpeech() {}
-                              override fun onRmsChanged(rmsdB: Float) {}
-                              override fun onBufferReceived(buffer: ByteArray?) {}
-                              override fun onEndOfSpeech() {}
-                              override fun onError(error: Int) { onResultCallback?.invoke(""); Log.e("Speech", "Error: $error") }
-                              override fun onResults(results: Bundle?) {
-                                  onResultCallback?.invoke(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: "")
-                              }
-                              override fun onPartialResults(partialResults: Bundle?) {}
-                              override fun onEvent(eventType: Int, params: Bundle?) {}
-                          })
+              private fun startEmotionTicker() {
+                  viewModelScope.launch {
+                      while (true) {
+                          delay(5 * 60 * 1000L)
+                          emotionEngine.tick(5.0)
+                          _currentEmotion.value = emotionEngine.getEmotionLabel()
+                          if (relationshipArc.checkAutoReconcile()) {
+                              emotionEngine.processEvent(EmotionalEvent(EventType.AI_GOAL_ACHIEVED, 3.0))
+                              _relationshipStage.value = "\u666e\u901a"
+                          }
+                          companionLife.rest(5)
+                          _companionStatus.value = companionLife.getCurrentState().description
                       }
-                      val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                          putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                          putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.CHINESE.toString())
-                          putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                      }
-                      speechRecognizer?.startListening(intent)
-                  } else {
-                      onResultCallback?.invoke("")
                   }
               }
 
-              fun stopListening() {
-                  speechRecognizer?.stopListening()
-                  speechRecognizer?.destroy()
-                  speechRecognizer = null
+              private fun checkAntiAddiction(): Boolean {
+                  return (System.currentTimeMillis() - sessionStartTime) / (1000 * 60) > 120
               }
+          }
 
-              suspend fun speak(text: String, companionName: String = "\u661f\u9ece", voice: String = "zh-CN-XiaoxiaoNeural") {
-                  val cleanText = text
-                      .replace(Regex("[\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\uFE00-\uFE0F]"), "")
-                      .replace(Regex("\u4efb\u52a1\u5206\u914d:.+"), "")
-                      .replace(Regex("\u8bb0\u5fc6\u89e6\u53d1:.+"), "")
-                      .trim()
+          // 扩展 suspend 获取 lastLocation
+          private suspend fun FusedLocationProviderClient.awaitLocation(): Location? {
+              return try {
+                  lastLocation.await()
+              } catch (e: Exception) { null }
+          }
+          EOF
 
-                  if (cleanText.isEmpty()) return
+      # 9. SettingsScreen（增加音色试听按钮）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/ui/settings/SettingsScreen.kt << 'EOF'
+          package com.example.stellae.ui.settings
 
-                  val success = tryEdgeTts(cleanText, voice)
-                  if (!success && isTtsReady) {
-                      textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, null)
-                  }
-              }
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.ArrowBack
+          import androidx.compose.material.icons.filled.PlayArrow
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.unit.dp
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.example.stellae.ChatViewModel
 
-              private suspend fun tryEdgeTts(text: String, voice: String): Boolean {
-                  return withContext(Dispatchers.IO) {
-                      try {
-                          val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
-                          val url = "https://tts.kina.ink/tts?text=$encodedText&voice=$voice&rate=%2B10%"
-                          val request = Request.Builder().url(url).build()
-                          val response = client.newCall(request).execute()
-                          if (!response.isSuccessful) return@withContext false
+          @OptIn(ExperimentalMaterial3Api::class)
+          @Composable
+          fun SettingsScreen(
+              onBack: () -> Unit,
+              viewModel: ChatViewModel = viewModel()
+          ) {
+              val companionName by viewModel.companionName.collectAsState()
+              var nameInput by remember { mutableStateOf(companionName) }
+              var selectedVoice by remember { mutableStateOf(viewModel.getSelectedVoice()) }
+              var selectedPersonality by remember { mutableStateOf(viewModel.getPersonality()) }
+              var selectedRelation by remember { mutableStateOf(viewModel.getRelation()) }
 
-                          val audioData = response.body?.bytes() ?: return@withContext false
-                          val tempFile = File(context.cacheDir, "edge_tts_${System.currentTimeMillis()}.mp3")
-                          FileOutputStream(tempFile).use { it.write(audioData) }
+              Scaffold(
+                  topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }) }
+              ) { padding ->
+                  Column(
+                      modifier = Modifier
+                          .fillMaxSize()
+                          .padding(padding)
+                          .verticalScroll(rememberScrollState())
+                          .padding(16.dp),
+                      verticalArrangement = Arrangement.spacedBy(16.dp)
+                  ) {
+                      // 1. 修改名字
+                      Card { Column(modifier = Modifier.padding(16.dp)) {
+                          Text("修改 AI 名字", style = MaterialTheme.typography.titleMedium)
+                          Spacer(modifier = Modifier.height(8.dp))
+                          OutlinedTextField(
+                              value = nameInput,
+                              onValueChange = { nameInput = it },
+                              label = { Text("新名字") },
+                              singleLine = true,
+                              modifier = Modifier.fillMaxWidth()
+                          )
+                          Button(onClick = { viewModel.setCompanionName(nameInput) }) {
+                              Text("保存名字")
+                          }
+                      }}
 
-                          withContext(Dispatchers.Main) {
-                              mediaPlayer?.release()
-                              mediaPlayer = MediaPlayer().apply {
-                                  setDataSource(tempFile.absolutePath)
-                                  prepare()
-                                  start()
-                                  setOnCompletionListener {
-                                      release()
-                                      tempFile.delete()
+                      // 2. 音色选择（带试听）
+                      Card { Column(modifier = Modifier.padding(16.dp)) {
+                          Text("音色选择", style = MaterialTheme.typography.titleMedium)
+                          Spacer(modifier = Modifier.height(8.dp))
+                          val voices = listOf(
+                              "zh-CN-XiaoxiaoNeural" to "晓晓（女，温柔）",
+                              "zh-CN-YunxiNeural" to "云希（男，阳光）",
+                              "zh-CN-YunjianNeural" to "云健（男，沉稳）",
+                              "zh-CN-XiaoyiNeural" to "晓伊（女，活泼）",
+                              "zh-CN-YunyangNeural" to "云扬（男，新闻）",
+                              "zh-CN-XiaochenNeural" to "晓辰（女，温暖）"
+                          )
+                          var expanded by remember { mutableStateOf(false) }
+                          ExposedDropdownMenuBox(
+                              expanded = expanded,
+                              onExpandedChange = { expanded = it }
+                          ) {
+                              TextField(
+                                  value = voices.find { it.first == selectedVoice }?.second ?: selectedVoice,
+                                  onValueChange = {},
+                                  readOnly = true,
+                                  trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                                  modifier = Modifier.fillMaxWidth().menuAnchor()
+                              )
+                              ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                                  voices.forEach { (key, label) ->
+                                      DropdownMenuItem(
+                                          text = { Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                              Text(label)
+                                              IconButton(onClick = {
+                                                  viewModel.previewVoice(key)
+                                              }) {
+                                                  Icon(Icons.Default.PlayArrow, null)
+                                              }
+                                          }},
+                                          onClick = {
+                                              selectedVoice = key
+                                              viewModel.setVoice(key)
+                                              expanded = false
+                                          }
+                                      )
                                   }
                               }
                           }
-                          true
-                      } catch (e: Exception) {
-                          Log.e("EdgeTTS", "Failed: ${e.message}")
-                          false
-                      }
+                      }}
+
+                      // 3. 性格倾向
+                      Card { Column(modifier = Modifier.padding(16.dp)) {
+                          Text("性格倾向", style = MaterialTheme.typography.titleMedium)
+                          Spacer(modifier = Modifier.height(8.dp))
+                          val personalities = listOf("活泼", "沉稳", "温柔")
+                          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                              personalities.forEach { p ->
+                                  FilterChip(
+                                      selected = selectedPersonality == p,
+                                      onClick = { selectedPersonality = p; viewModel.setPersonality(p) },
+                                      label = { Text(p) }
+                                  )
+                              }
+                          }
+                      }}
+
+                      // 4. 关系类型
+                      Card { Column(modifier = Modifier.padding(16.dp)) {
+                          Text("关系类型", style = MaterialTheme.typography.titleMedium)
+                          Spacer(modifier = Modifier.height(8.dp))
+                          val relations = listOf("朋友", "挚友", "恋人")
+                          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                              relations.forEach { r ->
+                                  FilterChip(
+                                      selected = selectedRelation == r,
+                                      onClick = { selectedRelation = r; viewModel.setRelation(r) },
+                                      label = { Text(r) }
+                                  )
+                              }
+                          }
+                      }}
+
+                      // 5. 位置信息（显示当前城市）
+                      Card { Column(modifier = Modifier.padding(16.dp)) {
+                          Text("当前位置", style = MaterialTheme.typography.titleMedium)
+                          Spacer(modifier = Modifier.height(8.dp))
+                          // 简单的占位，实际可从ViewModel获取
+                          // 可以加一个刷新按钮
+                          Button(onClick = { viewModel.requestLocationUpdate() }) {
+                              Text("刷新位置")
+                          }
+                      }}
                   }
-              }
-
-              fun stopSpeaking() {
-                  mediaPlayer?.stop()
-                  mediaPlayer?.release()
-                  mediaPlayer = null
-                  textToSpeech?.stop()
-              }
-
-              fun shutdown() {
-                  textToSpeech?.shutdown()
-                  speechRecognizer?.destroy()
-                  mediaPlayer?.release()
               }
           }
           EOF
 
-      # 6. 修改 MemoryManager（增加 getSetting/setSetting）
+      # 10. MainActivity（修复按住说话 + 设置入口）
       - run: |
-          cat > app/src/main/java/com/example/stellae/MemoryManager.kt << 'EOF'
+          cat > app/src/main/java/com/example/stellae/MainActivity.kt << 'EOF'
           package com.example.stellae
 
-          import android.content.Context
-          import com.example.stellae.data.AppDatabase
-          import com.example.stellae.data.MemoryEntity
-          import com.example.stellae.data.SettingsEntity
-          import kotlinx.coroutines.Dispatchers
-          import kotlinx.coroutines.withContext
+          import android.Manifest
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.compose.foundation.Image
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.lazy.rememberLazyListState
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.text.KeyboardActions
+          import androidx.compose.foundation.text.KeyboardOptions
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.*
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.graphics.asImageBitmap
+          import androidx.compose.foundation.gestures.awaitEachGesture
+          import androidx.compose.foundation.gestures.awaitFirstDown
+          import androidx.compose.ui.input.pointer.pointerInput
+          import androidx.compose.foundation.gestures.waitForUpOrCancellation
+          import androidx.compose.ui.text.input.ImeAction
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.google.accompanist.permissions.ExperimentalPermissionsApi
+          import com.google.accompanist.permissions.isGranted
+          import com.google.accompanist.permissions.rememberPermissionState
+          import com.example.stellae.ui.settings.SettingsScreen
+          import kotlinx.coroutines.launch
 
-          class MemoryManager(context: Context) {
-              private val dao = AppDatabase.getDatabase(context).memoryDao()
-              private val settingsDao = AppDatabase.getDatabase(context).settingsDao()
-
-              suspend fun getCompanionName(): String {
-                  return withContext(Dispatchers.IO) {
-                      settingsDao.getValue("companion_name") ?: "\u661f\u9ece"
-                  }
-              }
-
-              suspend fun setCompanionName(name: String) {
-                  withContext(Dispatchers.IO) {
-                      val existing = settingsDao.getValue("companion_name")
-                      if (existing == null) {
-                          settingsDao.insert(SettingsEntity("companion_name", name))
-                      } else {
-                          settingsDao.update(SettingsEntity("companion_name", name))
-                      }
-                  }
-              }
-
-              suspend fun getSetting(key: String): String? {
-                  return withContext(Dispatchers.IO) { settingsDao.getValue(key) }
-              }
-
-              suspend fun setSetting(key: String, value: String) {
-                  withContext(Dispatchers.IO) {
-                      val existing = settingsDao.getValue(key)
-                      if (existing == null) {
-                          settingsDao.insert(SettingsEntity(key, value))
-                      } else {
-                          settingsDao.update(SettingsEntity(key, value))
-                      }
-                  }
-              }
-
-              suspend fun saveInteraction(userInput: String, aiResponse: String, emotion: String) {
-                  withContext(Dispatchers.IO) {
-                      extractMemories(userInput, emotion).forEach { dao.insert(it) }
-                  }
-              }
-
-              suspend fun retrieveRelevantMemories(query: String): List<MemoryEntry> {
-                  return withContext(Dispatchers.IO) {
-                      val keywords = extractKeywords(query)
-                      val results = mutableListOf<MemoryEntity>()
-                      keywords.forEach { results.addAll(dao.searchMemories(it)) }
-                      results.distinctBy { it.id }.take(5).map { MemoryEntry(it.content, it.category, it.timestamp) }
-                  }
-              }
-
-              suspend fun retrieveAllMemories(): List<MemoryEntity> {
-                  return withContext(Dispatchers.IO) { dao.getAllMemories() }
-              }
-
-              suspend fun updateMemory(memory: MemoryEntity) {
-                  withContext(Dispatchers.IO) {
-                      dao.delete(memory)
-                      dao.insert(memory)
-                  }
-              }
-
-              private fun extractMemories(input: String, emotion: String): List<MemoryEntity> {
-                  val memories = mutableListOf<MemoryEntity>()
-                  val lower = input.lowercase()
-                  if (emotion in listOf("\u5fc3\u75bc", "\u5173\u5fc3", "\u5b89\u629a")) {
-                      memories.add(MemoryEntity(content = "\u7528\u6237\u66fe\u8868\u8fbe\u8fc7\u60c5\u7eea\u56f0\u6270\uff0c\u9700\u8981\u6e29\u67d4\u5bf9\u5f85", category = "emotion", importance = 5))
-                  }
-                  if (lower.contains("\u559c\u6b22") || lower.contains("\u7231")) {
-                      val thing = extractPreference(input)
-                      if (thing.isNotEmpty()) memories.add(MemoryEntity(content = "\u7528\u6237\u559c\u6b22: $thing", category = "preference", importance = 3))
-                  }
-                  if (lower.contains("\u751f\u65e5") || lower.contains("\u8003\u8bd5") || lower.contains("\u9762\u8bd5")) {
-                      memories.add(MemoryEntity(content = "\u7528\u6237\u63d0\u53ca: ${input.take(50)}", category = "event", importance = 4))
-                  }
-                  return memories
-              }
-
-              private fun extractKeywords(query: String): List<String> {
-                  val stopWords = setOf("\u7684", "\u4e86", "\u662f", "\u6211", "\u4f60", "\u5417", "\u5462", "\u5427", "\u554a", "\u4eca\u5929", "\u660e\u5929")
-                  return query.split(" ", "\uff0c", "\u3002", "\uff1f", "\uff01").flatMap { it.toList().map { c -> c.toString() } }.filter { it !in stopWords }.distinct().take(5)
-              }
-
-              private fun extractPreference(input: String): String {
-                  listOf("\u559c\u6b22(.+?)[\uff0c\u3002]", "\u7231(.+?)[\uff0c\u3002]", "\u6700\u7231(.+?)[\uff0c\u3002]").forEach { pattern ->
-                      Regex(pattern).find(input)?.let { return it.groupValues[1] }
-                  }
-                  return ""
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContent { ChatScreen() }
               }
           }
 
-          data class MemoryEntry(val content: String, val category: String, val timestamp: Long)
+          @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
+          @Composable
+          fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
+              val messages by viewModel.messages.collectAsState()
+              val isRecording by viewModel.isRecording.collectAsState()
+              val isProcessing by viewModel.isProcessing.collectAsState()
+              val currentEmotion by viewModel.currentEmotion.collectAsState()
+              val relationshipStage by viewModel.relationshipStage.collectAsState()
+              val companionName by viewModel.companionName.collectAsState()
+              val listState = rememberLazyListState()
+              var inputText by remember { mutableStateOf("") }
+              val scope = rememberCoroutineScope()
+              var showSettings by remember { mutableStateOf(false) }
+
+              val recordAudioPermissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+              val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
+              val locationPermissionState = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
+
+              val cameraLauncher = rememberLauncherForActivityResult(
+                  ActivityResultContracts.TakePicturePreview()
+              ) { bitmap ->
+                  if (bitmap != null) {
+                      viewModel.sendMessage("\u4f60\u770b\u770b\u8fd9\u4e2a", bitmap)
+                  }
+              }
+
+              LaunchedEffect(messages.size) {
+                  if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+              }
+
+              if (showSettings) {
+                  SettingsScreen(onBack = { showSettings = false }, viewModel = viewModel)
+              } else {
+                  Scaffold(
+                      topBar = {
+                          TopAppBar(
+                              title = {
+                                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                      Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF8B5CF6)), contentAlignment = Alignment.Center) {
+                                          Text(companionName.take(1), color = Color.White, fontSize = 18.sp)
+                                      }
+                                      Column {
+                                          Text(companionName, fontSize = 16.sp)
+                                          Row(verticalAlignment = Alignment.CenterVertically) {
+                                              Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF4ADE80)))
+                                              Spacer(modifier = Modifier.width(4.dp))
+                                              Text(if (isProcessing) "\u601d\u8003\u4e2d..." else "\u5728\u7ebf", fontSize = 12.sp, color = Color.Gray)
+                                              Spacer(modifier = Modifier.width(8.dp))
+                                              Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFE8F5E9)) {
+                                                  Text(currentEmotion, fontSize = 10.sp, color = Color(0xFF2E7D32), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                                              }
+                                              Spacer(modifier = Modifier.width(4.dp))
+                                              Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFFFF3E0)) {
+                                                  Text(relationshipStage, fontSize = 10.sp, color = Color(0xFFE65100), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                                              }
+                                          }
+                                      }
+                                  }
+                              },
+                              actions = {
+                                  IconButton(onClick = { showSettings = true }) {
+                                      Icon(Icons.Default.Settings, null)
+                                  }
+                              }
+                          )
+                      }
+                  ) { padding ->
+                      Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                          if (isProcessing) {
+                              Surface(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(12.dp), tonalElevation = 4.dp) {
+                                  Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                      CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                      Spacer(modifier = Modifier.width(8.dp))
+                                      Text("${companionName}\u6b63\u5728\u601d\u8003...", fontSize = 12.sp, color = Color.Gray)
+                                  }
+                              }
+                          }
+
+                          LazyColumn(
+                              state = listState,
+                              modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
+                              verticalArrangement = Arrangement.spacedBy(12.dp),
+                              contentPadding = PaddingValues(vertical = 16.dp)
+                          ) {
+                              items(messages) { msg -> ChatBubble(msg) }
+                          }
+
+                          Surface(tonalElevation = 2.dp) {
+                              Row(
+                                  modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                  verticalAlignment = Alignment.CenterVertically,
+                                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                              ) {
+                                  IconButton(
+                                      onClick = {
+                                          if (cameraPermissionState.status.isGranted) {
+                                              cameraLauncher.launch(null)
+                                          } else {
+                                              cameraPermissionState.launchPermissionRequest()
+                                          }
+                                      },
+                                      modifier = Modifier.size(44.dp)
+                                  ) {
+                                      Icon(Icons.Default.CameraAlt, null, tint = Color(0xFF1C1C1E))
+                                  }
+
+                                  OutlinedTextField(
+                                      value = inputText,
+                                      onValueChange = { inputText = it },
+                                      modifier = Modifier.weight(1f),
+                                      placeholder = { Text("\u8f93\u5165\u6d88\u606f...") },
+                                      shape = RoundedCornerShape(24.dp),
+                                      singleLine = true,
+                                      keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                      keyboardActions = KeyboardActions(onSend = {
+                                          if (inputText.isNotBlank()) {
+                                              viewModel.sendMessage(inputText)
+                                              inputText = ""
+                                          }
+                                      })
+                                  )
+
+                                  // 按住说话 + 发送按钮（修复版）
+                                  Box(
+                                      modifier = Modifier
+                                          .size(48.dp)
+                                          .clip(CircleShape)
+                                          .background(
+                                              when {
+                                                  isRecording -> Color(0xFFEF5350)
+                                                  inputText.isNotBlank() -> Color(0xFF1C1C1E)
+                                                  else -> Color(0xFF1C1C1E)
+                                              }
+                                          )
+                                          .pointerInput(Unit) {
+                                              awaitEachGesture {
+                                                  val down = awaitFirstDown()
+                                                  // 如果输入框有文字，则不启动录音，直接发送
+                                                  if (inputText.isBlank()) {
+                                                      // 请求录音权限
+                                                      if (recordAudioPermissionState.status.isGranted) {
+                                                          viewModel.startRecording()
+                                                      } else {
+                                                          recordAudioPermissionState.launchPermissionRequest()
+                                                      }
+                                                  }
+                                                  val up = waitForUpOrCancellation()
+                                                  if (inputText.isBlank() && up != null) {
+                                                      viewModel.stopRecording()
+                                                  } else if (inputText.isNotBlank() && up != null) {
+                                                      viewModel.sendMessage(inputText)
+                                                      inputText = ""
+                                                  }
+                                              }
+                                          },
+                                      contentAlignment = Alignment.Center
+                                  ) {
+                                      Icon(
+                                          imageVector = if (inputText.isNotBlank()) Icons.Default.Send else Icons.Default.Mic,
+                                          contentDescription = null,
+                                          tint = Color.White,
+                                          modifier = Modifier.size(20.dp)
+                                      )
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun ChatBubble(message: ChatMessage) {
+              val isUser = message.isUser
+              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
+                  Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
+                      message.imageBase64?.let { base64 ->
+                          val imageBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                          val bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                          bitmap?.let {
+                              Image(
+                                  bitmap = it.asImageBitmap(),
+                                  contentDescription = null,
+                                  modifier = Modifier
+                                      .sizeIn(maxWidth = 200.dp, maxHeight = 200.dp)
+                                      .clip(RoundedCornerShape(12.dp))
+                              )
+                              Spacer(modifier = Modifier.height(4.dp))
+                          }
+                      }
+
+                      Surface(
+                          shape = RoundedCornerShape(
+                              topStart = 16.dp, topEnd = 16.dp,
+                              bottomStart = if (isUser) 16.dp else 4.dp,
+                              bottomEnd = if (isUser) 4.dp else 16.dp
+                          ),
+                          color = if (isUser) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+                      ) {
+                          Column(modifier = Modifier.padding(12.dp)) {
+                              Text(message.content, color = if (isUser) Color.White else Color.Black, fontSize = 14.sp, lineHeight = 20.sp)
+                              message.taskLabel?.let {
+                                  Spacer(modifier = Modifier.height(6.dp))
+                                  Surface(shape = RoundedCornerShape(6.dp), color = if (isUser) Color(0x33FFFFFF) else Color(0x1F6750A4)) {
+                                      Text(it, fontSize = 10.sp, color = if (isUser) Color(0xFFE0E0E0) else Color(0xFF6750A4), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                                  }
+                              }
+                              message.memoryHint?.let {
+                                  Spacer(modifier = Modifier.height(4.dp))
+                                  Text(it, fontSize = 10.sp, color = if (isUser) Color(0xB3FFFFFF) else Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                              }
+                          }
+                      }
+                  }
+              }
+          }
           EOF
 
       # ========== 最后构建并上传 ==========
