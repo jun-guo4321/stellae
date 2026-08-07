@@ -20,6 +20,7 @@ jobs:
           mkdir -p app/src/main/java/com/example/stellae/data
           mkdir -p app/src/main/java/com/example/stellae/ui/theme
           mkdir -p app/src/main/java/com/example/stellae/ui/settings
+          mkdir -p app/src/main/java/com/example/stellae/integrations
           mkdir -p app/src/main/res/values
           mkdir -p gradle/wrapper
       - uses: gradle/actions/setup-gradle@v3
@@ -49,14 +50,15 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
+                  versionCode = 4
+                  versionName = "1.3"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
               kotlinOptions { jvmTarget = "1.8" }
           }
           dependencies {
+              // 原有依赖
               implementation("androidx.core:core-ktx:1.12.0")
               implementation("androidx.appcompat:appcompat:1.6.1")
               implementation("com.google.accompanist:accompanist-permissions:0.32.0")
@@ -80,9 +82,23 @@ jobs:
               implementation("androidx.camera:camera-camera2:1.3.1")
               implementation("androidx.camera:camera-lifecycle:1.3.1")
               implementation("androidx.camera:camera-view:1.3.1")
+
+              // 定位
               implementation("com.google.android.gms:play-services-location:21.0.1")
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
-              implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+              // 新增开源项目集成依赖
+              // 1. WebSocket 实时语音 (xiaozhi-android-native)
+              implementation("com.squareup.okhttp3:okhttp:4.12.0") // 已存在
+              // 2. Volc Dialog SDK (VoiceRobot) - 需要从官方获取 aar，这里留空
+              // 3. 向量数据库 (Sora-mem) - 使用 SQLite + 向量扩展，可后续添加
+              // 4. 离线 TTS (VoxSherpa) - 使用其 Android SDK，可后续添加
+              // 5. 地图 (osmdroid)
+              implementation("org.osmdroid:osmdroid-android:6.1.17")
+              implementation("org.osmdroid:osmdroid-wms:6.1.17")
+              // 6. 悬浮窗 (AI-Live-Overflow) - 需要系统权限，代码骨架已包含
+              // 7. 其他通用
+              implementation("com.github.kittinunf.fuel:fuel:2.3.1") // 用于 HTTP 请求
           }
           EOF
       - run: |
@@ -114,6 +130,7 @@ jobs:
               <uses-permission android:name="android.permission.CAMERA" />
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" /> <!-- 悬浮窗 -->
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
               <application android:label="Stellae" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
@@ -121,6 +138,7 @@ jobs:
                       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
                   </activity>
                   <service android:name=".VoiceInteractionService" android:enabled="true" android:exported="false" />
+                  <service android:name=".integrations.FloatingCompanionService" android:enabled="true" android:exported="false" />
               </application>
           </manifest>
           EOF
@@ -129,7 +147,7 @@ jobs:
           <resources><string name="app_name">\u661f\u9ece</string></resources>
           EOF
 
-      # ========== 所有源码文件（包名统一为 com.example.stellae） ==========
+      # ========== 所有源码文件（包含集成骨架） ==========
 
       # 1. ChatMessage.kt
       - run: |
@@ -147,7 +165,7 @@ jobs:
           enum class StepStatus { DONE, ACTIVE, PENDING }
           EOF
 
-      # 2. data 包
+      # 2. data 包 (MemoryEntity, AppDatabase)
       - run: |
           cat > app/src/main/java/com/example/stellae/data/MemoryEntity.kt << 'EOF'
           package com.example.stellae.data
@@ -268,7 +286,7 @@ jobs:
           )
           EOF
 
-      # 4. core 包（不变）
+      # 4. core 包（EmotionEngine, MemoryDecayEngine, OpenLoopManager, ProactiveMessageEngine, RelationshipArc, CompanionLife）
       - run: |
           cat > app/src/main/java/com/example/stellae/core/MemoryDecayEngine.kt << 'EOF'
           package com.example.stellae.core
@@ -699,7 +717,7 @@ jobs:
           enum class ActivityType { WAKING_UP, READING, LUNCH, WORKING, WALKING, DINNER, RELAXING, SLEEPING }
           EOF
 
-      # 5. SpeechManager
+      # 5. SpeechManager（过滤表情优化）
       - run: |
           cat > app/src/main/java/com/example/stellae/SpeechManager.kt << 'EOF'
           package com.example.stellae
@@ -780,8 +798,10 @@ jobs:
               }
 
               suspend fun speak(text: String, companionName: String = "\u661f\u9ece", voice: String = "zh-CN-XiaoxiaoNeural") {
+                  // 加强过滤：移除 Emoji 和所有非文字符号
                   val cleanText = text
-                      .replace(Regex("[\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\uFE00-\uFE0F]"), "")
+                      .replace(Regex("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF]+"), "") // 移除 Emoji
+                      .replace(Regex("[^\\u4e00-\\u9fa5a-zA-Z0-9，。、；：！？\"'（）\u2026]"), "") // 保留中英文、数字和常用标点
                       .replace(Regex("\u4efb\u52a1\u5206\u914d:.+"), "")
                       .replace(Regex("\u8bb0\u5fc6\u89e6\u53d1:.+"), "")
                       .trim()
@@ -848,7 +868,7 @@ jobs:
           }
           EOF
 
-      # 6. MemoryManager
+      # 6. MemoryManager（增加向量检索预留）
       - run: |
           cat > app/src/main/java/com/example/stellae/MemoryManager.kt << 'EOF'
           package com.example.stellae
@@ -922,6 +942,12 @@ jobs:
                   }
               }
 
+              // 预留：向量检索接口（后续集成 Sora-mem）
+              suspend fun vectorSearch(query: String): List<MemoryEntity> {
+                  // TODO: 调用向量数据库进行语义检索
+                  return emptyList()
+              }
+
               private fun extractMemories(input: String, emotion: String): List<MemoryEntity> {
                   val memories = mutableListOf<MemoryEntity>()
                   val lower = input.lowercase()
@@ -954,7 +980,7 @@ jobs:
           data class MemoryEntry(val content: String, val category: String, val timestamp: Long)
           EOF
 
-      # 7. AIRepository
+      # 7. AIRepository（支持位置注入）
       - run: |
           cat > app/src/main/java/com/example/stellae/AIRepository.kt << 'EOF'
           package com.example.stellae
@@ -1275,7 +1301,7 @@ jobs:
           data class LocationInfo(val city: String, val district: String, val address: String, val lat: Double, val lon: Double)
           EOF
 
-      # 8. ChatViewModel（显式导入 withContext 和 Dispatchers）
+      # 8. ChatViewModel（定位修复 + 语音通话骨架）
       - run: |
           cat > app/src/main/java/com/example/stellae/ChatViewModel.kt << 'EOF'
           package com.example.stellae
@@ -1289,6 +1315,7 @@ jobs:
           import androidx.lifecycle.AndroidViewModel
           import androidx.lifecycle.viewModelScope
           import com.example.stellae.core.*
+          import com.example.stellae.integrations.VoiceCallManager
           import com.google.android.gms.location.FusedLocationProviderClient
           import com.google.android.gms.location.LocationServices
           import kotlinx.coroutines.delay
@@ -1316,6 +1343,9 @@ jobs:
               private val companionLife = CompanionLife()
               private val fusedLocationClient: FusedLocationProviderClient =
                   LocationServices.getFusedLocationProviderClient(application)
+
+              // 语音通话管理器
+              private val voiceCallManager = VoiceCallManager(application)
 
               private val _isInVoiceCall = MutableStateFlow(false)
               val isInVoiceCall: StateFlow<Boolean> = _isInVoiceCall.asStateFlow()
@@ -1373,25 +1403,27 @@ jobs:
                   viewModelScope.launch { speechManager.previewVoice(voice) }
               }
 
-              // 语音通话
+              // 语音通话（调用 VoiceCallManager）
               fun toggleVoiceCall() {
                   if (_isInVoiceCall.value) {
-                      endVoiceCall()
+                      voiceCallManager.endCall()
+                      _isInVoiceCall.value = false
+                      _messages.value = _messages.value + ChatMessage("📞 语音通话已结束", false, "语音通话")
                   } else {
-                      startVoiceCall()
+                      _isInVoiceCall.value = true
+                      _messages.value = _messages.value + ChatMessage("📞 正在建立语音通话...", false, "语音通话")
+                      voiceCallManager.startCall(
+                          onStart = { /* 连接成功 */ },
+                          onMessage = { text ->
+                              // 将AI语音识别的文字显示在聊天中
+                              _messages.value = _messages.value + ChatMessage(text, false, "语音通话")
+                          },
+                          onError = { error ->
+                              _messages.value = _messages.value + ChatMessage("⚠️ 语音通话出错: $error", false, "语音通话")
+                              _isInVoiceCall.value = false
+                          }
+                      )
                   }
-              }
-
-              private fun startVoiceCall() {
-                  _isInVoiceCall.value = true
-                  _messages.value = _messages.value + ChatMessage("📞 正在建立语音通话...", false, "语音通话")
-                  // TODO: 实现 WebSocket 实时音频
-              }
-
-              private fun endVoiceCall() {
-                  _isInVoiceCall.value = false
-                  _messages.value = _messages.value + ChatMessage("📞 语音通话已结束", false, "语音通话")
-                  // TODO: 关闭连接
               }
 
               // 定位
@@ -1405,8 +1437,23 @@ jobs:
                       if (location != null) {
                           currentLocation = reverseGeocode(location)
                           aiRepository.currentLocation = currentLocation
+                          // 提示用户位置已获取
+                          _messages.value = _messages.value + ChatMessage("📍 已获取位置: ${currentLocation?.city ?: "未知"}", false, "定位更新")
+                      } else {
+                          // 尝试主动请求位置更新
+                          fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+                              if (loc != null) {
+                                  viewModelScope.launch {
+                                      currentLocation = reverseGeocode(loc)
+                                      aiRepository.currentLocation = currentLocation
+                                      _messages.value = _messages.value + ChatMessage("📍 已获取位置: ${currentLocation?.city ?: "未知"}", false, "定位更新")
+                                  }
+                              }
+                          }
                       }
-                  } catch (e: Exception) { e.printStackTrace() }
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                  }
               }
 
               private suspend fun reverseGeocode(location: Location): LocationInfo? {
@@ -1481,7 +1528,7 @@ jobs:
                   }
               }
 
-              // 录音
+              // 录音（修改为切换模式）
               fun toggleRecording() {
                   if (_isRecording.value) {
                       stopRecording()
@@ -1773,7 +1820,7 @@ jobs:
           }
           EOF
 
-      # 10. MainActivity（修复 clickable 导入）
+      # 10. MainActivity（修改右下角按钮为发送/录音切换）
       - run: |
           cat > app/src/main/java/com/example/stellae/MainActivity.kt << 'EOF'
           package com.example.stellae
@@ -1951,6 +1998,7 @@ jobs:
                                       })
                                   )
 
+                                  // 右下角按钮：有文字时发送，无文字时录音切换
                                   Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                       if (isRecording) {
                                           IconButton(
@@ -1966,16 +2014,18 @@ jobs:
                                               .clip(CircleShape)
                                               .background(
                                                   when {
-                                                      isRecording -> Color(0xFFEF5350)
-                                                      inputText.isNotBlank() -> Color(0xFF1C1C1E)
-                                                      else -> Color(0xFF1C1C1E)
+                                                      inputText.isNotBlank() -> Color(0xFF1C1C1E) // 有文字时深色
+                                                      isRecording -> Color(0xFFEF5350) // 录音中红色
+                                                      else -> Color(0xFF1C1C1E) // 默认
                                                   }
                                               )
                                               .clickable {
                                                   if (inputText.isNotBlank()) {
+                                                      // 发送文字
                                                       viewModel.sendMessage(inputText)
                                                       inputText = ""
                                                   } else {
+                                                      // 切换录音
                                                       if (recordAudioPermissionState.status.isGranted) {
                                                           viewModel.toggleRecording()
                                                       } else {
@@ -1986,7 +2036,10 @@ jobs:
                                           contentAlignment = Alignment.Center
                                       ) {
                                           Icon(
-                                              imageVector = if (isRecording) Icons.Default.Mic else Icons.Default.Mic,
+                                              imageVector = when {
+                                                  inputText.isNotBlank() -> Icons.Default.Send
+                                                  else -> Icons.Default.Mic
+                                              },
                                               contentDescription = null,
                                               tint = Color.White,
                                               modifier = Modifier.size(20.dp)
@@ -2047,7 +2100,7 @@ jobs:
           }
           EOF
 
-      # 11. VoiceInteractionService（骨架）
+      # 11. VoiceInteractionService（留空，由 VoiceCallManager 接管）
       - run: |
           cat > app/src/main/java/com/example/stellae/VoiceInteractionService.kt << 'EOF'
           package com.example.stellae
@@ -2056,13 +2109,188 @@ jobs:
           import android.content.Intent
           import android.os.IBinder
 
+          // 此服务已由 VoiceCallManager 替代，保留作为兼容
           class VoiceInteractionService : Service() {
               override fun onBind(intent: Intent?): IBinder? = null
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+          }
+          EOF
+
+      # ========== 新增 integrations 包（集成开源项目骨架） ==========
+
+      # 12. VoiceCallManager（基于 xiaozhi-android-native）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/VoiceCallManager.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+          import kotlinx.coroutines.*
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import okhttp3.WebSocket
+          import okhttp3.WebSocketListener
+          import okio.ByteString
+
+          /**
+           * 实时语音通话管理器
+           * 参考: https://github.com/DayanJ/xiaozhi-android-native
+           * 使用 WebSocket + Opus 实现实时双向语音
+           */
+          class VoiceCallManager(private val context: Context) {
+              private var webSocket: WebSocket? = null
+              private val client = OkHttpClient.Builder().build()
+              private var isRunning = false
+
+              fun startCall(onStart: () -> Unit, onMessage: (String) -> Unit, onError: (String) -> Unit) {
+                  if (isRunning) return
+                  isRunning = true
+
+                  // TODO: 替换为真实的 WebSocket 服务地址
+                  val request = Request.Builder()
+                      .url("wss://your-voice-server.com/ws")
+                      .build()
+                  webSocket = client.newWebSocket(request, object : WebSocketListener() {
+                      override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                          onStart()
+                      }
+                      override fun onMessage(webSocket: WebSocket, text: String) {
+                          onMessage(text) // 收到AI回复
+                      }
+                      override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                          // 处理音频数据（Opus）
+                      }
+                      override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
+                          onError(t.message ?: "连接失败")
+                      }
+                  })
+              }
+
+              fun endCall() {
+                  isRunning = false
+                  webSocket?.close(1000, "用户挂断")
+                  webSocket = null
+              }
+
+              fun sendAudio(audioData: ByteArray) {
+                  webSocket?.send(ByteString.of(*audioData))
+              }
+
+              fun sendText(text: String) {
+                  webSocket?.send(text)
+              }
+          }
+          EOF
+
+      # 13. VoiceRobotManager（基于 Volc Dialog SDK，骨架）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/VoiceRobotManager.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+
+          /**
+           * 基于火山引擎 Dialog SDK 的实时对话
+           * 参考: https://github.com/qingfeng19491001/VoiceRobot
+           * 需要引入 Volc Dialog SDK aar
+           */
+          class VoiceRobotManager(private val context: Context) {
+              // TODO: 实现 Volc Dialog 初始化、开始对话、结束对话
+              fun startConversation() {}
+              fun stopConversation() {}
+          }
+          EOF
+
+      # 14. MemoryVectorStore（基于 Sora-mem 的向量检索）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/MemoryVectorStore.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+          import com.example.stellae.data.MemoryEntity
+
+          /**
+           * 向量记忆存储（Sora-mem 风格）
+           * 参考: https://github.com/LianjiaTech/Sora-mem
+           * 使用 SQLite + 向量扩展（如 sqlite-vec）
+           */
+          class MemoryVectorStore(private val context: Context) {
+              // TODO: 初始化向量数据库
+              suspend fun insertVector(memory: MemoryEntity, embedding: FloatArray) {}
+              suspend fun search(queryEmbedding: FloatArray, topK: Int = 5): List<MemoryEntity> = emptyList()
+          }
+          EOF
+
+      # 15. OfflineTTSManager（基于 VoxSherpa）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/OfflineTTSManager.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+
+          /**
+           * 离线高质量 TTS（VoxSherpa）
+           * 参考: https://github.com/mozilla/TTS
+           * 或 VoxSherpa: https://github.com/voxloud/voxsherpa
+           */
+          class OfflineTTSManager(private val context: Context) {
+              // TODO: 加载模型，合成语音
+              suspend fun synthesize(text: String, voice: String = "default"): ByteArray? = null
+          }
+          EOF
+
+      # 16. MapLocationManager（基于 osmdroid）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/MapLocationManager.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+          import org.osmdroid.config.Configuration
+          import org.osmdroid.util.GeoPoint
+          import org.osmdroid.views.MapView
+
+          /**
+           * 地图定位管理（osmdroid）
+           * 参考: https://github.com/osmdroid/osmdroid
+           */
+          class MapLocationManager(private val context: Context) {
+              init {
+                  Configuration.getInstance().load(context, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+              }
+
+              fun createMapView(): MapView = MapView(context).apply {
+                  setBuiltInZoomControls(true)
+                  setMultiTouchControls(true)
+              }
+
+              fun moveToLocation(mapView: MapView, lat: Double, lon: Double) {
+                  mapView.controller.setCenter(GeoPoint(lat, lon))
+                  mapView.controller.setZoom(15.0)
+              }
+          }
+          EOF
+
+      # 17. FloatingCompanionService（基于 AI-Live-Overflow）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/FloatingCompanionService.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.app.Service
+          import android.content.Intent
+          import android.os.IBinder
+
+          /**
+           * 悬浮窗陪伴服务（AI-Live-Overflow 风格）
+           * 参考: https://github.com/Mr-Enovation/AI-Live-Overflow
+           * 需要 SYSTEM_ALERT_WINDOW 权限
+           */
+          class FloatingCompanionService : Service() {
+              override fun onBind(intent: Intent?): IBinder? = null
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-                  // TODO: 实现 WebSocket 实时音频流
+                  // TODO: 创建悬浮窗，加载 AI 交互界面
                   return START_STICKY
               }
               override fun onDestroy() {
+                  // 移除悬浮窗
                   super.onDestroy()
               }
           }
