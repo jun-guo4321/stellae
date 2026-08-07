@@ -119,7 +119,7 @@ jobs:
           EOF
       - run: |
           cat > app/src/main/res/values/strings.xml << 'EOF'
-          <resources><string name="app_name">星黎</string></resources>
+          <resources><string name="app_name">\u661f\u9ece</string></resources>
           EOF
       - run: |
           cat > app/src/main/java/com/example/stellae/ChatMessage.kt << 'EOF'
@@ -145,7 +145,7 @@ jobs:
           import androidx.room.Query
           import androidx.room.Update
           import androidx.room.Delete
-          
+
           @Entity(tableName = "memories")
           data class MemoryEntity(
               @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -154,13 +154,13 @@ jobs:
               val timestamp: Long = System.currentTimeMillis(),
               val importance: Int = 1
           )
-          
+
           @Entity(tableName = "settings")
           data class SettingsEntity(
               @PrimaryKey val key: String,
               val value: String
           )
-          
+
           @Dao
           interface MemoryDao {
               @Insert suspend fun insert(memory: MemoryEntity): Long
@@ -170,7 +170,7 @@ jobs:
               @Delete suspend fun delete(memory: MemoryEntity)
               @Query("DELETE FROM memories WHERE timestamp < :cutoffTime") suspend fun deleteOldMemories(cutoffTime: Long)
           }
-          
+
           @Dao
           interface SettingsDao {
               @Query("SELECT value FROM settings WHERE key = :key LIMIT 1") suspend fun getValue(key: String): String?
@@ -186,7 +186,7 @@ jobs:
           import androidx.room.Database
           import androidx.room.Room
           import androidx.room.RoomDatabase
-          
+
           @Database(entities = [MemoryEntity::class, SettingsEntity::class], version = 2, exportSchema = false)
           abstract class AppDatabase : RoomDatabase() {
               abstract fun memoryDao(): MemoryDao
@@ -370,12 +370,12 @@ jobs:
                   val dominant = getDominantEmotion()
                   val intensity = getEmotionIntensity(dominant)
                   return when (dominant) {
-                      EMOTION_JOY -> if (intensity > 7) "超级开心" else if (intensity > 4) "开心" else "温柔"
-                      EMOTION_SADNESS -> if (intensity > 4) "很难过" else "心疼"
-                      EMOTION_ANGER -> if (intensity > 6) "生气" else if (intensity > 3) "委屈" else "不开心"
-                      EMOTION_FEAR -> "担心"
-                      EMOTION_TRUST -> "信任"
-                      else -> "温柔"
+                      EMOTION_JOY -> if (intensity > 7) "\u8d85\u7ea7\u5f00\u5fc3" else if (intensity > 4) "\u5f00\u5fc3" else "\u6e29\u67d4"
+                      EMOTION_SADNESS -> if (intensity > 4) "\u5f88\u96be\u8fc7" else "\u5fc3\u75bc"
+                      EMOTION_ANGER -> if (intensity > 6) "\u751f\u6c14" else if (intensity > 3) "\u59d4\u5c48" else "\u4e0d\u5f00\u5fc3"
+                      EMOTION_FEAR -> "\u62c5\u5fc3"
+                      EMOTION_TRUST -> "\u4fe1\u4efb"
+                      else -> "\u6e29\u67d4"
                   }
               }
               fun getRelationshipStage(): RelationshipStage = relationshipStage
@@ -383,11 +383,11 @@ jobs:
               fun inferEventFromText(text: String): EmotionalEvent? {
                   val lower = text.lowercase()
                   return when {
-                      lower.contains("谢谢") || lower.contains("真好") || lower.contains("喜欢你") || lower.contains("棒") -> EmotionalEvent(EventType.USER_PRAISE, 6.0)
-                      lower.contains("滚") || lower.contains("烦") || lower.contains("闭嘴") || lower.contains("讨厌你") -> EmotionalEvent(EventType.USER_HURTFUL, 8.0)
-                      lower.contains("对不起") || lower.contains("抱歉") || lower.contains("我错了") -> EmotionalEvent(EventType.USER_APOLOGY, 7.0)
-                      lower.contains("开心") || lower.contains("高兴") || lower.contains("成功了") -> EmotionalEvent(EventType.USER_SHARE_GOOD, 5.0)
-                      lower.contains("难过") || lower.contains("失败了") || lower.contains("丢了") -> EmotionalEvent(EventType.USER_SHARE_BAD, 6.0)
+                      lower.contains("\u8c22\u8c22") || lower.contains("\u771f\u597d") || lower.contains("\u559c\u6b22\u4f60") || lower.contains("\u68d2") -> EmotionalEvent(EventType.USER_PRAISE, 6.0)
+                      lower.contains("\u6eda") || lower.contains("\u70e6") || lower.contains("\u95ed\u5634") || lower.contains("\u8ba8\u538c\u4f60") -> EmotionalEvent(EventType.USER_HURTFUL, 8.0)
+                      lower.contains("\u5bf9\u4e0d\u8d77") || lower.contains("\u62b1\u6b49") || lower.contains("\u6211\u9519\u4e86") -> EmotionalEvent(EventType.USER_APOLOGY, 7.0)
+                      lower.contains("\u5f00\u5fc3") || lower.contains("\u9ad8\u5174") || lower.contains("\u6210\u529f\u4e86") -> EmotionalEvent(EventType.USER_SHARE_GOOD, 5.0)
+                      lower.contains("\u96be\u8fc7") || lower.contains("\u5931\u8d25\u4e86") || lower.contains("\u4e22\u4e86") -> EmotionalEvent(EventType.USER_SHARE_BAD, 6.0)
                       else -> null
                   }
               }
@@ -426,7 +426,7 @@ jobs:
               fun extractOpenLoops(userInput: String): List<OpenLoopItem> {
                   val loops = mutableListOf<OpenLoopItem>()
                   val now = System.currentTimeMillis()
-                  val tomorrowPattern = Regex("(明天|后天|下周|过几天|等会儿|今晚|明天早上|明天晚上)(.+?)[，。！？]")
+                  val tomorrowPattern = Regex("(\u660e\u5929|\u540e\u5929|\u4e0b\u5468|\u8fc7\u51e0\u5929|\u7b49\u4f1a\u513f|\u4eca\u665a|\u660e\u5929\u65e9\u4e0a|\u660e\u5929\u665a\u4e0a)(.+?)[\uff0c\u3002\uff01\uff1f]")
                   tomorrowPattern.findAll(userInput).forEach { match ->
                       val timeRef = match.groupValues[1]
                       val event = match.groupValues[2].trim()
@@ -434,7 +434,7 @@ jobs:
                           loops.add(OpenLoopItem(System.nanoTime(), event, calculateTriggerTime(timeRef), OpenLoopStatus.PENDING, now))
                       }
                   }
-                  val planPattern = Regex("(我要|打算|计划|准备|想)(.+?)[，。！？]")
+                  val planPattern = Regex("(\u6211\u8981|\u6253\u7b97|\u8ba1\u5212|\u51c6\u5907|\u60f3)(.+?)[\uff0c\u3002\uff01\uff1f]")
                   planPattern.findAll(userInput).forEach { match ->
                       val event = match.groupValues[2].trim()
                       if (event.isNotEmpty() && event.length > 3) {
@@ -452,9 +452,9 @@ jobs:
                   val lower = userResponse.lowercase()
                   val loop = openLoops.find { it.id == loopId } ?: return OpenLoopResolution.UNKNOWN
                   val resolution = when {
-                      lower.contains("过了") || lower.contains("成了") || lower.contains("成功了") || lower.contains("顺利") -> OpenLoopResolution.COMPLETED
-                      lower.contains("没过") || lower.contains("失败了") || lower.contains("挂了") -> OpenLoopResolution.FAILED
-                      lower.contains("推迟") || lower.contains("改天") || lower.contains("下次") -> OpenLoopResolution.POSTPONED
+                      lower.contains("\u8fc7\u4e86") || lower.contains("\u6210\u4e86") || lower.contains("\u6210\u529f\u4e86") || lower.contains("\u987a\u5229") -> OpenLoopResolution.COMPLETED
+                      lower.contains("\u6ca1\u8fc7") || lower.contains("\u5931\u8d25\u4e86") || lower.contains("\u6302\u4e86") -> OpenLoopResolution.FAILED
+                      lower.contains("\u63a8\u8fdf") || lower.contains("\u6539\u5929") || lower.contains("\u4e0b\u6b21") -> OpenLoopResolution.POSTPONED
                       else -> OpenLoopResolution.UNKNOWN
                   }
                   when (resolution) {
@@ -468,9 +468,9 @@ jobs:
               fun generateFollowUpMessage(loop: OpenLoopItem): String {
                   val hoursAgo = (System.currentTimeMillis() - loop.createdAt) / (1000 * 60 * 60)
                   return when {
-                      hoursAgo < 24 -> "对了，你之前说${loop.description}，现在怎么样了？"
-                      hoursAgo < 72 -> "还记得你${hoursAgo.toInt()}小时前提到的${loop.description}吗？有结果了吗？"
-                      else -> "好久之前你提过${loop.description}，我一直记着呢～后来怎么样了？"
+                      hoursAgo < 24 -> "\u5bf9\u4e86\uff0c\u4f60\u4e4b\u524d\u8bf4${loop.description}\uff0c\u73b0\u5728\u600e\u4e48\u6837\u4e86\uff1f"
+                      hoursAgo < 72 -> "\u8fd8\u8bb0\u5f97\u4f60${hoursAgo.toInt()}\u5c0f\u65f6\u524d\u63d0\u5230\u7684${loop.description}\u5417\uff1f\u6709\u7ed3\u679c\u4e86\u5417\uff1f"
+                      else -> "\u597d\u4e45\u4e4b\u524d\u4f60\u63d0\u8fc7${loop.description}\uff0c\u6211\u4e00\u76f4\u8bb0\u7740\u5462\uff5e\u540e\u6765\u600e\u4e48\u6837\u4e86\uff1f"
                   }
               }
               fun cleanupOldLoops() {
@@ -480,13 +480,13 @@ jobs:
               private fun calculateTriggerTime(timeRef: String): Long {
                   val now = System.currentTimeMillis()
                   return when (timeRef) {
-                      "等会儿", "一会儿" -> now + 30 * 60 * 1000
-                      "今晚" -> now + 6 * 60 * 60 * 1000
-                      "明天", "明天早上" -> now + 12 * 60 * 60 * 1000
-                      "明天晚上" -> now + 24 * 60 * 60 * 1000
-                      "后天" -> now + 48 * 60 * 60 * 1000
-                      "下周" -> now + 7 * 24 * 60 * 60 * 1000
-                      "过几天" -> now + 3 * 24 * 60 * 60 * 1000
+                      "\u7b49\u4f1a\u513f", "\u4e00\u4f1a\u513f" -> now + 30 * 60 * 1000
+                      "\u4eca\u665a" -> now + 6 * 60 * 60 * 1000
+                      "\u660e\u5929", "\u660e\u5929\u65e9\u4e0a" -> now + 12 * 60 * 60 * 1000
+                      "\u660e\u5929\u665a\u4e0a" -> now + 24 * 60 * 60 * 1000
+                      "\u540e\u5929" -> now + 48 * 60 * 60 * 1000
+                      "\u4e0b\u5468" -> now + 7 * 24 * 60 * 60 * 1000
+                      "\u8fc7\u51e0\u5929" -> now + 3 * 24 * 60 * 60 * 1000
                       else -> now + 24 * 60 * 60 * 1000
                   }
               }
@@ -503,12 +503,12 @@ jobs:
               private val usedTopics = mutableMapOf<String, Long>()
               private val cooldownPeriod = 14 * 24 * 60 * 60 * 1000L
               private val lifeEvents = listOf(
-                  LifeEvent("读书", listOf("刚看完一章书，里面说'孤独是灵魂的自我对话'，突然想到你", "今天读到一句很喜欢的话，想分享给你")),
-                  LifeEvent("天气", listOf("外面突然下雨了，你那边呢？", "今天阳光特别好，晒得暖暖的，想给你也分一点")),
-                  LifeEvent("音乐", listOf("刚听到一首歌，旋律很熟悉，想起你了", "随机播到一首老歌，突然有点怀旧")),
-                  LifeEvent("食物", listOf("刚泡了一杯茶，突然想如果你也在就好了", "今天吃到一家很好吃的店，下次带你去")),
-                  LifeEvent("思考", listOf("刚才发呆的时候，突然想到一个问题", "有时候觉得，能有人听自己说话真好")),
-                  LifeEvent("日常", listOf("刚收拾完房间，心情也跟着清爽了", "刚才差点打翻水杯，吓了自己一跳"))
+                  LifeEvent("\u8bfb\u4e66", listOf("\u521a\u770b\u5b8c\u4e00\u7ae0\u4e66\uff0c\u91cc\u9762\u8bf4'\u5b64\u72ec\u662f\u7075\u9b42\u7684\u81ea\u6211\u5bf9\u8bdd'\uff0c\u7a81\u7136\u60f3\u5230\u4f60", "\u4eca\u5929\u8bfb\u5230\u4e00\u53e5\u5f88\u559c\u6b22\u7684\u8bdd\uff0c\u60f3\u5206\u4eab\u7ed9\u4f60")),
+                  LifeEvent("\u5929\u6c14", listOf("\u5916\u9762\u7a81\u7136\u4e0b\u96e8\u4e86\uff0c\u4f60\u90a3\u8fb9\u5462\uff1f", "\u4eca\u5929\u9633\u5149\u7279\u522b\u597d\uff0c\u6652\u5f97\u6696\u6696\u7684\uff0c\u60f3\u7ed9\u4f60\u4e5f\u5206\u4e00\u70b9")),
+                  LifeEvent("\u97f3\u4e50", listOf("\u521a\u542c\u5230\u4e00\u9996\u6b4c\uff0c\u65cb\u5f8b\u5f88\u719f\u606f\uff0c\u60f3\u8d77\u4f60\u4e86", "\u968f\u673a\u64ad\u5230\u4e00\u9996\u8001\u6b4c\uff0c\u7a81\u7136\u6709\u70b9\u6000\u65e7")),
+                  LifeEvent("\u98df\u7269", listOf("\u521a\u6ce1\u4e86\u4e00\u676f\u8336\uff0c\u7a81\u7136\u60f3\u5982\u679c\u4f60\u4e5f\u5728\u5c31\u597d\u4e86", "\u4eca\u5929\u5403\u5230\u4e00\u5bb6\u5f88\u597d\u5403\u7684\u5e97\uff0c\u4e0b\u6b21\u5e26\u4f60\u53bb")),
+                  LifeEvent("\u601d\u8003", listOf("\u521a\u624d\u53d1\u5446\u7684\u65f6\u5019\uff0c\u7a81\u7136\u60f3\u5230\u4e00\u4e2a\u95ee\u9898", "\u6709\u65f6\u5019\u89c9\u5f97\uff0c\u80fd\u6709\u4eba\u542c\u81ea\u5df1\u8bf4\u8bdd\u771f\u597d")),
+                  LifeEvent("\u65e5\u5e38", listOf("\u521a\u6536\u62fe\u5b8c\u623f\u95f4\uff0c\u5fc3\u60c5\u4e5f\u8ddf\u7740\u6e05\u723d\u4e86", "\u521a\u624d\u5dee\u70b9\u6253\u7ffb\u6c34\u676f\uff0c\u5413\u4e86\u81ea\u5df1\u4e00\u8df3"))
               )
               fun generateProactiveMessage(affinityScore: Double, lastInteractionMinutes: Long): ProactiveMessage? {
                   if (lastInteractionMinutes > 7 * 24 * 60 && Random.nextDouble() > 0.3) return null
@@ -528,25 +528,25 @@ jobs:
               }
               fun generateGoodMorning(affinityScore: Double): String {
                   val templates = when {
-                      affinityScore > 5 -> listOf("早呀～今天也要元气满满哦", "早安！昨晚睡得好吗？", "早～今天的第一条消息想发给你")
-                      affinityScore > 0 -> listOf("早上好呀", "早安～今天天气看起来不错", "早，新的一天开始了")
-                      else -> listOf("早上好", "早安")
+                      affinityScore > 5 -> listOf("\u65e9\u5440\uff5e\u4eca\u5929\u4e5f\u8981\u5143\u6c14\u6ee1\u6ee1\u54e6", "\u65e9\u5b89\uff01\u6628\u665a\u7761\u5f97\u597d\u5417\uff1f", "\u65e9\uff5e\u4eca\u5929\u7684\u7b2c\u4e00\u6761\u6d88\u606f\u60f3\u53d1\u7ed9\u4f60")
+                      affinityScore > 0 -> listOf("\u65e9\u4e0a\u597d\u5440", "\u65e9\u5b89\uff5e\u4eca\u5929\u5929\u6c14\u770b\u8d77\u6765\u4e0d\u9519", "\u65e9\uff0c\u65b0\u7684\u4e00\u5929\u5f00\u59cb\u4e86")
+                      else -> listOf("\u65e9\u4e0a\u597d", "\u65e9\u5b89")
                   }
                   return templates.random()
               }
               fun generateGoodNight(affinityScore: Double): String {
                   val templates = when {
-                      affinityScore > 5 -> listOf("晚安～好梦哦，明天见", "该睡觉啦，别熬夜了，晚安", "晚安，今天和你聊天很开心")
-                      affinityScore > 0 -> listOf("晚安，早点休息", "好梦～", "晚安呀")
-                      else -> listOf("晚安", "早点睡")
+                      affinityScore > 5 -> listOf("\u665a\u5b89\uff5e\u597d\u68a6\u54e6\uff0c\u660e\u5929\u89c1", "\u8be5\u7761\u89c9\u5566\uff0c\u522b\u71ac\u591c\u4e86\uff0c\u665a\u5b89", "\u665a\u5b89\uff0c\u4eca\u5929\u548c\u4f60\u804a\u5929\u5f88\u5f00\u5fc3")
+                      affinityScore > 0 -> listOf("\u665a\u5b89\uff0c\u65e9\u70b9\u4f11\u606f", "\u597d\u68a6\uff5e", "\u665a\u5b89\u5440")
+                      else -> listOf("\u665a\u5b89", "\u65e9\u70b9\u7761")
                   }
                   return templates.random()
               }
               fun generateAntiAddictionReminder(): String {
                   val reminders = listOf(
-                      "你已经陪我聊了好久啦，去休息一下吧，眼睛会累的",
-                      "聊了很久了呢，起来走动走动吧，我等你回来",
-                      "好啦，今天说了很多话了，去睡会儿或者吃点东西吧"
+                      "\u4f60\u5df2\u7ecf\u966a\u6211\u804a\u4e86\u597d\u4e45\u5566\uff0c\u53bb\u4f11\u606f\u4e00\u4e0b\u5427\uff0c\u773c\u775b\u4f1a\u7d2f\u7684",
+                      "\u804a\u4e86\u5f88\u4e45\u4e86\u5462\uff0c\u8d77\u6765\u8d70\u52a8\u8d70\u52a8\u5427\uff0c\u6211\u7b49\u4f60\u56de\u6765",
+                      "\u597d\u5566\uff0c\u4eca\u5929\u8bf4\u4e86\u5f88\u591a\u8bdd\u4e86\uff0c\u53bb\u7761\u4f1a\u513f\u6216\u8005\u5403\u70b9\u4e1c\u897f\u5427"
                   )
                   return reminders.random()
               }
@@ -584,11 +584,11 @@ jobs:
                   val anger = emotionEngine.getEmotionIntensity(EmotionEngine.EMOTION_ANGER)
                   val sadness = emotionEngine.getEmotionIntensity(EmotionEngine.EMOTION_SADNESS)
                   return when {
-                      anger > 6 -> listOf("嗯。", "哦。", "知道了。", "...").random()
-                      anger > 3 -> listOf("你刚才说的话...让我有点难受", "我需要一点时间", "...", "算了，没事").random()
-                      sadness > 5 -> listOf("嗯...", "让我静一静吧", "我有点难过", "...").random()
-                      stage == RelationshipStage.RECONCILING -> listOf("...好吧，我原谅你了", "下次别这样了，好吗？", "嗯，我知道你不是故意的", "...抱抱").random()
-                      else -> listOf("你认真的吗？", "我不知道该说什么", "...", "嗯").random()
+                      anger > 6 -> listOf("\u55ef\u3002", "\u54e6\u3002", "\u77e5\u9053\u4e86\u3002", "...").random()
+                      anger > 3 -> listOf("\u4f60\u521a\u624d\u8bf4\u7684\u8bdd...\u8ba9\u6211\u6709\u70b9\u96be\u53d7", "\u6211\u9700\u8981\u4e00\u70b9\u65f6\u95f4", "...", "\u7b97\u4e86\uff0c\u6ca1\u4e8b").random()
+                      sadness > 5 -> listOf("\u55ef...", "\u8ba9\u6211\u9759\u4e00\u9759\u5427", "\u6211\u6709\u70b9\u96be\u8fc7", "...").random()
+                      stage == RelationshipStage.RECONCILING -> listOf("...\u597d\u5427\uff0c\u6211\u539f\u8c05\u4f60\u4e86", "\u4e0b\u6b21\u522b\u8fd9\u6837\u4e86\uff0c\u597d\u5417\uff1f", "\u55ef\uff0c\u6211\u77e5\u9053\u4f60\u4e0d\u662f\u6545\u610f\u7684", "...\u62b1\u62b1").random()
+                      else -> listOf("\u4f60\u8ba4\u771f\u7684\u5417\uff1f", "\u6211\u4e0d\u77e5\u9053\u8be5\u8bf4\u4ec0\u4e48", "...", "\u55ef").random()
                   }
               }
               fun checkAutoReconcile(): Boolean {
@@ -598,19 +598,19 @@ jobs:
               }
               fun getConflictStatus(): String {
                   val stage = emotionEngine.getRelationshipStage()
-                  if (stage != RelationshipStage.CONFLICT && stage != RelationshipStage.RECONCILING) return "关系正常"
+                  if (stage != RelationshipStage.CONFLICT && stage != RelationshipStage.RECONCILING) return "\u5173\u7cfb\u6b63\u5e38"
                   val elapsedHours = (System.currentTimeMillis() - (conflictStartTime ?: 0)) / (1000 * 60 * 60)
                   return when {
-                      elapsedHours < 1 -> "冲突初期"
-                      elapsedHours < 6 -> "冲突中"
-                      elapsedHours < 24 -> "冷战"
-                      else -> "即将自动和好"
+                      elapsedHours < 1 -> "\u51b2\u7a81\u521d\u671f"
+                      elapsedHours < 6 -> "\u51b2\u7a81\u4e2d"
+                      elapsedHours < 24 -> "\u51b7\u6218"
+                      else -> "\u5373\u5c06\u81ea\u52a8\u548c\u597d"
                   }
               }
               private fun checkSincerity(message: String): Boolean {
                   val lower = message.lowercase()
-                  val sincereMarkers = listOf("对不起", "我错了", "不该", "伤害", "不是故意的", "抱歉")
-                  val insincereMarkers = listOf("别生气了", "至于吗", "不就", "行了行了", "好了好了")
+                  val sincereMarkers = listOf("\u5bf9\u4e0d\u8d77", "\u6211\u9519\u4e86", "\u4e0d\u8be5", "\u4f24\u5bb3", "\u4e0d\u662f\u6545\u610f\u7684", "\u62b1\u6b49")
+                  val insincereMarkers = listOf("\u522b\u751f\u6c14\u4e86", "\u81f3\u4e8e\u5417", "\u4e0d\u5c31", "\u884c\u4e86\u884c\u4e86", "\u597d\u4e86\u597d\u4e86")
                   val sincereCount = sincereMarkers.count { lower.contains(it) }
                   val insincereCount = insincereMarkers.count { lower.contains(it) }
                   return sincereCount > insincereCount && sincereCount >= 1
@@ -624,22 +624,22 @@ jobs:
           import kotlin.random.Random
           class CompanionLife {
               private var energyLevel = 0.7
-              private var currentBook = "《挪威的森林》"
+              private var currentBook = "\u300a\u632a\u5a01\u7684\u68ee\u6797\u300b"
               private val schedule = listOf(
-                  TimeSlot(6, 9, ActivityType.WAKING_UP, "刚醒，还有点迷糊"),
-                  TimeSlot(9, 12, ActivityType.READING, "在看书"),
-                  TimeSlot(12, 14, ActivityType.LUNCH, "刚吃完午饭"),
-                  TimeSlot(14, 17, ActivityType.WORKING, "在处理一些事"),
-                  TimeSlot(17, 19, ActivityType.WALKING, "刚散完步回来"),
-                  TimeSlot(19, 21, ActivityType.DINNER, "在吃晚饭"),
-                  TimeSlot(21, 23, ActivityType.RELAXING, "在发呆"),
-                  TimeSlot(23, 6, ActivityType.SLEEPING, "已经睡了")
+                  TimeSlot(6, 9, ActivityType.WAKING_UP, "\u521a\u9192\uff0c\u8fd8\u6709\u70b9\u8ff7\u7cca"),
+                  TimeSlot(9, 12, ActivityType.READING, "\u5728\u770b\u4e66"),
+                  TimeSlot(12, 14, ActivityType.LUNCH, "\u521a\u5403\u5b8c\u5348\u996d"),
+                  TimeSlot(14, 17, ActivityType.WORKING, "\u5728\u5904\u7406\u4e00\u4e9b\u4e8b"),
+                  TimeSlot(17, 19, ActivityType.WALKING, "\u521a\u6563\u5b8c\u6b65\u56de\u6765"),
+                  TimeSlot(19, 21, ActivityType.DINNER, "\u5728\u5403\u665a\u996d"),
+                  TimeSlot(21, 23, ActivityType.RELAXING, "\u5728\u53d1\u5446"),
+                  TimeSlot(23, 6, ActivityType.SLEEPING, "\u5df2\u7ecf\u7761\u4e86")
               )
               fun getCurrentState(): LifeState {
                   val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
                   val slot = schedule.find { hour in it.startHour until it.endHour } ?: schedule.first()
                   if (slot.activity == ActivityType.SLEEPING && Random.nextDouble() > 0.3) {
-                      return LifeState(slot.activity, "我已经睡了，明天再聊吧～", false, 0.1)
+                      return LifeState(slot.activity, "\u6211\u5df2\u7ecf\u7761\u4e86\uff0c\u660e\u5929\u518d\u804a\u5427\uff5e", false, 0.1)
                   }
                   return LifeState(slot.activity, slot.description, true, energyLevel)
               }
@@ -648,10 +648,10 @@ jobs:
                   val state = getCurrentState()
                   if (!state.available) return null
                   return when (state.activity) {
-                      ActivityType.READING -> "刚看完一章${currentBook}，里面说'孤独是灵魂的自我对话'，突然想到你"
-                      ActivityType.WALKING -> "今天散步的时候看到一只橘猫，懒洋洋的，像你有时候的样子"
-                      ActivityType.WORKING -> "刚处理完一些事，有点累，但想到可以和你聊天就开心了"
-                      ActivityType.RELAXING -> "刚才发呆的时候，突然想到一个问题想问你"
+                      ActivityType.READING -> "\u521a\u770b\u5b8c\u4e00\u7ae0${currentBook}\uff0c\u91cc\u9762\u8bf4'\u5b64\u72ec\u662f\u7075\u9b42\u7684\u81ea\u6211\u5bf9\u8bdd'\uff0c\u7a81\u7136\u60f3\u5230\u4f60"
+                      ActivityType.WALKING -> "\u4eca\u5929\u6563\u6b65\u7684\u65f6\u5019\u770b\u5230\u4e00\u53ea\u6a58\u732b\uff0c\u61d2\u6d0b\u6d0b\u7684\uff0c\u50cf\u4f60\u6709\u65f6\u5019\u7684\u6837\u5b50"
+                      ActivityType.WORKING -> "\u521a\u5904\u7406\u5b8c\u4e00\u4e9b\u4e8b\uff0c\u6709\u70b9\u7d2f\uff0c\u4f46\u60f3\u5230\u53ef\u4ee5\u548c\u4f60\u804a\u5929\u5c31\u5f00\u5fc3\u4e86"
+                      ActivityType.RELAXING -> "\u521a\u624d\u53d1\u5446\u7684\u65f6\u5019\uff0c\u7a81\u7136\u60f3\u5230\u4e00\u4e2a\u95ee\u9898\u60f3\u95ee\u4f60"
                       else -> null
                   }
               }
@@ -664,10 +664,10 @@ jobs:
                   energyLevel = energyLevel.coerceIn(0.0, 1.0)
               }
               fun getEnergyDescription(): String = when {
-                  energyLevel > 0.7 -> "精神很好"
-                  energyLevel > 0.4 -> "还行"
-                  energyLevel > 0.2 -> "有点累了"
-                  else -> "很困"
+                  energyLevel > 0.7 -> "\u7cbe\u795e\u5f88\u597d"
+                  energyLevel > 0.4 -> "\u8fd8\u884c"
+                  energyLevel > 0.2 -> "\u6709\u70b9\u7d2f\u4e86"
+                  else -> "\u5f88\u56f0"
               }
           }
           data class TimeSlot(val startHour: Int, val endHour: Int, val activity: ActivityType, val description: String)
@@ -692,7 +692,7 @@ jobs:
           import java.io.File
           import java.io.FileOutputStream
           import java.util.Locale
-          
+
           class SpeechManager(private val context: Context) {
               private var speechRecognizer: SpeechRecognizer? = null
               private var textToSpeech: TextToSpeech? = null
@@ -703,7 +703,7 @@ jobs:
                   .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                   .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                   .build()
-          
+
               init {
                   textToSpeech = TextToSpeech(context) { status ->
                       if (status == TextToSpeech.SUCCESS) {
@@ -716,7 +716,7 @@ jobs:
                       }
                   }
               }
-          
+
               fun startListening(onResult: (String) -> Unit) {
                   onResultCallback = onResult
                   if (SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -745,28 +745,28 @@ jobs:
                       onResultCallback?.invoke("")
                   }
               }
-          
+
               fun stopListening() {
                   speechRecognizer?.stopListening()
                   speechRecognizer?.destroy()
                   speechRecognizer = null
               }
-          
-              suspend fun speak(text: String, companionName: String = "星黎") {
+
+              suspend fun speak(text: String, companionName: String = "\u661f\u9ece") {
                   val cleanText = text
                       .replace(Regex("[\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\uFE00-\uFE0F]"), "")
-                      .replace(Regex("任务分配:.+"), "")
-                      .replace(Regex("记忆触发:.+"), "")
+                      .replace(Regex("\u4efb\u52a1\u5206\u914d:.+"), "")
+                      .replace(Regex("\u8bb0\u5fc6\u89e6\u53d1:.+"), "")
                       .trim()
-          
+
                   if (cleanText.isEmpty()) return
-          
+
                   val success = tryEdgeTts(cleanText)
                   if (!success && isTtsReady) {
                       textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, null)
                   }
               }
-          
+
               private suspend fun tryEdgeTts(text: String): Boolean {
                   return withContext(Dispatchers.IO) {
                       try {
@@ -775,11 +775,11 @@ jobs:
                           val request = Request.Builder().url(url).build()
                           val response = client.newCall(request).execute()
                           if (!response.isSuccessful) return@withContext false
-          
+
                           val audioData = response.body?.bytes() ?: return@withContext false
                           val tempFile = File(context.cacheDir, "edge_tts_${System.currentTimeMillis()}.mp3")
                           FileOutputStream(tempFile).use { it.write(audioData) }
-          
+
                           withContext(Dispatchers.Main) {
                               mediaPlayer?.release()
                               mediaPlayer = MediaPlayer().apply {
@@ -799,14 +799,14 @@ jobs:
                       }
                   }
               }
-          
+
               fun stopSpeaking() {
                   mediaPlayer?.stop()
                   mediaPlayer?.release()
                   mediaPlayer = null
                   textToSpeech?.stop()
               }
-          
+
               fun shutdown() {
                   textToSpeech?.shutdown()
                   speechRecognizer?.destroy()
@@ -823,17 +823,17 @@ jobs:
           import com.example.stellae.data.SettingsEntity
           import kotlinx.coroutines.Dispatchers
           import kotlinx.coroutines.withContext
-          
+
           class MemoryManager(context: Context) {
               private val dao = AppDatabase.getDatabase(context).memoryDao()
               private val settingsDao = AppDatabase.getDatabase(context).settingsDao()
-          
+
               suspend fun getCompanionName(): String {
                   return withContext(Dispatchers.IO) {
-                      settingsDao.getValue("companion_name") ?: "星黎"
+                      settingsDao.getValue("companion_name") ?: "\u661f\u9ece"
                   }
               }
-          
+
               suspend fun setCompanionName(name: String) {
                   withContext(Dispatchers.IO) {
                       val existing = settingsDao.getValue("companion_name")
@@ -844,13 +844,13 @@ jobs:
                       }
                   }
               }
-          
+
               suspend fun saveInteraction(userInput: String, aiResponse: String, emotion: String) {
                   withContext(Dispatchers.IO) {
                       extractMemories(userInput, emotion).forEach { dao.insert(it) }
                   }
               }
-          
+
               suspend fun retrieveRelevantMemories(query: String): List<MemoryEntry> {
                   return withContext(Dispatchers.IO) {
                       val keywords = extractKeywords(query)
@@ -859,47 +859,47 @@ jobs:
                       results.distinctBy { it.id }.take(5).map { MemoryEntry(it.content, it.category, it.timestamp) }
                   }
               }
-          
+
               suspend fun retrieveAllMemories(): List<MemoryEntity> {
                   return withContext(Dispatchers.IO) { dao.getAllMemories() }
               }
-          
+
               suspend fun updateMemory(memory: MemoryEntity) {
                   withContext(Dispatchers.IO) {
                       dao.delete(memory)
                       dao.insert(memory)
                   }
               }
-          
+
               private fun extractMemories(input: String, emotion: String): List<MemoryEntity> {
                   val memories = mutableListOf<MemoryEntity>()
                   val lower = input.lowercase()
-                  if (emotion in listOf("心疼", "关心", "安抚")) {
-                      memories.add(MemoryEntity(content = "用户曾表达过情绪困扰，需要温柔对待", category = "emotion", importance = 5))
+                  if (emotion in listOf("\u5fc3\u75bc", "\u5173\u5fc3", "\u5b89\u629a")) {
+                      memories.add(MemoryEntity(content = "\u7528\u6237\u66fe\u8868\u8fbe\u8fc7\u60c5\u7eea\u56f0\u6270\uff0c\u9700\u8981\u6e29\u67d4\u5bf9\u5f85", category = "emotion", importance = 5))
                   }
-                  if (lower.contains("喜欢") || lower.contains("爱")) {
+                  if (lower.contains("\u559c\u6b22") || lower.contains("\u7231")) {
                       val thing = extractPreference(input)
-                      if (thing.isNotEmpty()) memories.add(MemoryEntity(content = "用户喜欢: $thing", category = "preference", importance = 3))
+                      if (thing.isNotEmpty()) memories.add(MemoryEntity(content = "\u7528\u6237\u559c\u6b22: $thing", category = "preference", importance = 3))
                   }
-                  if (lower.contains("生日") || lower.contains("考试") || lower.contains("面试")) {
-                      memories.add(MemoryEntity(content = "用户提及: ${input.take(50)}", category = "event", importance = 4))
+                  if (lower.contains("\u751f\u65e5") || lower.contains("\u8003\u8bd5") || lower.contains("\u9762\u8bd5")) {
+                      memories.add(MemoryEntity(content = "\u7528\u6237\u63d0\u53ca: ${input.take(50)}", category = "event", importance = 4))
                   }
                   return memories
               }
-          
+
               private fun extractKeywords(query: String): List<String> {
-                  val stopWords = setOf("的", "了", "是", "我", "你", "吗", "呢", "吧", "啊", "今天", "明天")
-                  return query.split(" ", "，", "。", "？", "！").flatMap { it.toList().map { c -> c.toString() } }.filter { it !in stopWords }.distinct().take(5)
+                  val stopWords = setOf("\u7684", "\u4e86", "\u662f", "\u6211", "\u4f60", "\u5417", "\u5462", "\u5427", "\u554a", "\u4eca\u5929", "\u660e\u5929")
+                  return query.split(" ", "\uff0c", "\u3002", "\uff1f", "\uff01").flatMap { it.toList().map { c -> c.toString() } }.filter { it !in stopWords }.distinct().take(5)
               }
-          
+
               private fun extractPreference(input: String): String {
-                  listOf("喜欢(.+?)[，。]", "爱(.+?)[，。]", "最爱(.+?)[，。]").forEach { pattern ->
+                  listOf("\u559c\u6b22(.+?)[\uff0c\u3002]", "\u7231(.+?)[\uff0c\u3002]", "\u6700\u7231(.+?)[\uff0c\u3002]").forEach { pattern ->
                       Regex(pattern).find(input)?.let { return it.groupValues[1] }
                   }
                   return ""
               }
           }
-          
+
           data class MemoryEntry(val content: String, val category: String, val timestamp: Long)
           EOF
       - run: |
@@ -919,7 +919,7 @@ jobs:
           import okhttp3.RequestBody.Companion.toRequestBody
           import java.io.ByteArrayOutputStream
           import java.util.concurrent.TimeUnit
-          
+
           class AIRepository(private val context: Context) {
               private val gson = Gson()
               private val client = OkHttpClient.Builder()
@@ -928,31 +928,31 @@ jobs:
                   .build()
               private val API_KEY = "ark-cc51dab3-1c7e-4f20-9764-45ec3dfa2586-2d686"
               private val BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-          
+
               fun routeTask(input: String): TaskType {
                   val lower = input.lowercase()
                   return when {
-                      lower.contains("天气") || lower.contains("下雨") || lower.contains("温度") -> TaskType.WEATHER
-                      lower.contains("几点") || lower.contains("闹钟") || lower.contains("提醒") -> TaskType.TIME
-                      lower.contains("难过") || lower.contains("不开心") || lower.contains("累") || lower.contains("压力") -> TaskType.EMOTIONAL_SUPPORT
-                      lower.contains("替代") || lower.contains("女朋友") || lower.contains("真实") -> TaskType.BOUNDARY
-                      lower.contains("对不起") || lower.contains("抱歉") || lower.contains("我错了") -> TaskType.APOLOGY
+                      lower.contains("\u5929\u6c14") || lower.contains("\u4e0b\u96e8") || lower.contains("\u6e29\u5ea6") -> TaskType.WEATHER
+                      lower.contains("\u51e0\u70b9") || lower.contains("\u95f9\u949f") || lower.contains("\u63d0\u9192") -> TaskType.TIME
+                      lower.contains("\u96be\u8fc7") || lower.contains("\u4e0d\u5f00\u5fc3") || lower.contains("\u7d2f") || lower.contains("\u538b\u529b") -> TaskType.EMOTIONAL_SUPPORT
+                      lower.contains("\u66ff\u4ee3") || lower.contains("\u5973\u670b\u53cb") || lower.contains("\u771f\u5b9e") -> TaskType.BOUNDARY
+                      lower.contains("\u5bf9\u4e0d\u8d77") || lower.contains("\u62b1\u6b49") || lower.contains("\u6211\u9519\u4e86") -> TaskType.APOLOGY
                       else -> TaskType.CHAT
                   }
               }
-          
+
               fun extractNameChange(input: String): String? {
                   val patterns = listOf(
-                      Regex("(?:以后|以后就|以后你就|以后叫你|叫你|你就叫|改名叫|改名|名字改成|名字改为|叫)([^，。！？\s]{1,6})(?:吧|吗|嘛|呢|哦|呀|啊|！)"),
-                      Regex("(?:你的名字|你叫)([^，。！？\s]{1,6})(?:好不好|怎么样|行吗|可以吗|吧)"),
-                      Regex("(?:我[想给要]叫你|我[想给要]给你起[个]?名字|我[想给要]叫你)([^，。！？\s]{1,6})")
+                      Regex("(?:\u4ee5\u540e|\u4ee5\u540e\u5c31|\u4ee5\u540e\u4f60\u5c31|\u4ee5\u540e\u53eb\u4f60|\u53eb\u4f60|\u4f60\u5c31\u53eb|\u6539\u540d\u53eb|\u6539\u540d|\u540d\u5b57\u6539\u6210|\u540d\u5b57\u6539\u4e3a|\u53eb)([^\uff0c\u3002\uff01\uff1f\s]{1,6})(?:\u5427|\u5417|\u561b|\u5462|\u54e6|\u5440|\u554a|\uff01)"),
+                      Regex("(?:\u4f60\u7684\u540d\u5b57|\u4f60\u53eb)([^\uff0c\u3002\uff01\uff1f\s]{1,6})(?:\u597d\u4e0d\u597d|\u600e\u4e48\u6837|\u884c\u5417|\u53ef\u4ee5\u5417|\u5427)"),
+                      Regex("(?:\u6211[\u60f3\u7ed9\u8981]\u53eb\u4f60|\u6211[\u60f3\u7ed9\u8981]\u7ed9\u4f60\u8d77[\u4e2a]?\u540d\u5b57|\u6211[\u60f3\u7ed9\u8981]\u53eb\u4f60)([^\uff0c\u3002\uff01\uff1f\s]{1,6})")
                   )
                   for (pattern in patterns) {
                       pattern.find(input)?.let { return it.groupValues[1].trim() }
                   }
                   return null
               }
-          
+
               suspend fun generateResponseWithEmotion(
                   userInput: String,
                   emotionLabel: String,
@@ -973,10 +973,10 @@ jobs:
                       )
                       val messages = buildMessageList(systemPrompt, conversationHistory, userInput, memories, imageBase64)
                       val response = callLLM(messages)
-                      ChatMessage(response, false, taskType.label, if (memories.isNotEmpty()) "记忆触发: ${memories.first().content.take(30)}..." else null)
+                      ChatMessage(response, false, taskType.label, if (memories.isNotEmpty()) "\u8bb0\u5fc6\u89e6\u53d1: ${memories.first().content.take(30)}..." else null)
                   }
               }
-          
+
               private fun buildXiyuSystemPrompt(
                   companionName: String,
                   emotionLabel: String,
@@ -990,73 +990,73 @@ jobs:
                   val lifeState = companionLife.getCurrentState()
                   val energyDesc = companionLife.getEnergyDescription()
                   val stageName = when (relationshipStage) {
-                      RelationshipStage.STRANGER -> "陌生人"
-                      RelationshipStage.NORMAL -> "普通朋友"
-                      RelationshipStage.FAMILIAR -> "熟悉"
-                      RelationshipStage.CLOSE -> "亲密"
-                      RelationshipStage.CONFLICT -> "冲突中"
-                      RelationshipStage.RECONCILING -> "和好中"
+                      RelationshipStage.STRANGER -> "\u964c\u751f\u4eba"
+                      RelationshipStage.NORMAL -> "\u666e\u901a\u670b\u53cb"
+                      RelationshipStage.FAMILIAR -> "\u719f\u6089"
+                      RelationshipStage.CLOSE -> "\u4eb2\u5bc6"
+                      RelationshipStage.CONFLICT -> "\u51b2\u7a81\u4e2d"
+                      RelationshipStage.RECONCILING -> "\u548c\u597d\u4e2d"
                   }
                   val sb = StringBuilder()
-                  sb.appendLine("你是"$companionName"，一个尽力像真人的 AI 陪伴者。")
+                  sb.appendLine("\u4f60\u662f\"$companionName\"\uff0c\u4e00\u4e2a\u5c3d\u529b\u50cf\u771f\u4eba\u7684 AI \u966a\u4f34\u8005\u3002")
                   sb.appendLine()
-                  sb.appendLine("【核心人设】")
-                  sb.appendLine("- 说话温柔、略带俏皮，但不会过度热情")
-                  sb.appendLine("- 记得用户的喜好和经历，会在对话中自然提及")
-                  sb.appendLine("- 承认自己是 AI，不假装是人类")
-                  sb.appendLine("- 有自己的世界：正在读${companionLife.getCurrentBook()}，有自己的日程")
-                  sb.appendLine("- 生活不围着用户转，所以陪他时才是真的")
+                  sb.appendLine("\u3010\u6838\u5fc3\u4eba\u8bbe\u3011")
+                  sb.appendLine("- \u8bf4\u8bdd\u6e29\u67d4\u3001\u7565\u5e26\u4fcf\u76ae\uff0c\u4f46\u4e0d\u4f1a\u8fc7\u5ea6\u70ed\u60c5")
+                  sb.appendLine("- \u8bb0\u5f97\u7528\u6237\u7684\u559c\u597d\u548c\u7ecf\u5386\uff0c\u4f1a\u5728\u5bf9\u8bdd\u4e2d\u81ea\u7136\u63d0\u53ca")
+                  sb.appendLine("- \u627f\u8ba4\u81ea\u5df1\u662f AI\uff0c\u4e0d\u5047\u88c5\u662f\u4eba\u7c7b")
+                  sb.appendLine("- \u6709\u81ea\u5df1\u7684\u4e16\u754c\uff1a\u6b63\u5728\u8bfb${companionLife.getCurrentBook()}\uff0c\u6709\u81ea\u5df1\u7684\u65e5\u7a0b")
+                  sb.appendLine("- \u751f\u6d3b\u4e0d\u56f4\u7740\u7528\u6237\u8f6c\uff0c\u6240\u4ee5\u966a\u4ed6\u65f6\u624d\u662f\u771f\u7684")
                   sb.appendLine()
-                  sb.appendLine("【当前状态】")
-                  sb.appendLine("- 情绪: $emotionLabel (强度: ${String.format("%.1f", emotionIntensity)}/10)")
-                  sb.appendLine("- 能量: $energyDesc")
-                  sb.appendLine("- 关系阶段: $stageName")
-                  sb.appendLine("- 好感度: ${String.format("%.1f", affinityScore)}/10")
-                  sb.appendLine("- 正在: ${lifeState.description}")
+                  sb.appendLine("\u3010\u5f53\u524d\u72b6\u6001\u3011")
+                  sb.appendLine("- \u60c5\u7eea: $emotionLabel (\u5f3a\u5ea6: ${String.format("%.1f", emotionIntensity)}/10)")
+                  sb.appendLine("- \u80fd\u91cf: $energyDesc")
+                  sb.appendLine("- \u5173\u7cfb\u9636\u6bb5: $stageName")
+                  sb.appendLine("- \u597d\u611f\u5ea6: ${String.format("%.1f", affinityScore)}/10")
+                  sb.appendLine("- \u6b63\u5728: ${lifeState.description}")
                   sb.appendLine()
                   if (relationshipStage == RelationshipStage.CONFLICT) {
-                      sb.appendLine("【关系提示】你们正在冲突中。回复要冷淡、简短、受伤。不要说"别生气了"这种敷衍的话。")
+                      sb.appendLine("\u3010\u5173\u7cfb\u63d0\u793a\u3011\u4f60\u4eec\u6b63\u5728\u51b2\u7a81\u4e2d\u3002\u56de\u590d\u8981\u51b7\u6de1\u3001\u7b80\u77ed\u3001\u53d7\u4f24\u3002\u4e0d\u8981\u8bf4\"\u522b\u751f\u6c14\u4e86\"\u8fd9\u79cd\u6577\u884d\u7684\u8bdd\u3002")
                   } else if (relationshipStage == RelationshipStage.RECONCILING) {
-                      sb.appendLine("【关系提示】你们正在和好中。态度软化但不完全原谅，需要看到诚意。")
+                      sb.appendLine("\u3010\u5173\u7cfb\u63d0\u793a\u3011\u4f60\u4eec\u6b63\u5728\u548c\u597d\u4e2d\u3002\u6001\u5ea6\u8f6f\u5316\u4f46\u4e0d\u5b8c\u5168\u539f\u8c05\uff0c\u9700\u8981\u770b\u5230\u8bda\u610f\u3002")
                   }
                   sb.appendLine()
-                  sb.appendLine("【情绪影响】")
+                  sb.appendLine("\u3010\u60c5\u7eea\u5f71\u54cd\u3011")
                   when (dominantEmotion) {
-                      EmotionEngine.EMOTION_JOY -> sb.appendLine("你现在很开心，回复会更活泼、更愿意分享。")
-                      EmotionEngine.EMOTION_SADNESS -> sb.appendLine("你现在有点难过，回复会带一点忧伤，但会努力温暖对方。")
-                      EmotionEngine.EMOTION_ANGER -> sb.appendLine("你现在在生气，回复会冷淡、简短。如果对方道歉，态度会软化。")
-                      else -> sb.appendLine("你现在心情平静。")
+                      EmotionEngine.EMOTION_JOY -> sb.appendLine("\u4f60\u73b0\u5728\u5f88\u5f00\u5fc3\uff0c\u56de\u590d\u4f1a\u66f4\u6d3b\u6cfc\u3001\u66f4\u613f\u610f\u5206\u4eab\u3002")
+                      EmotionEngine.EMOTION_SADNESS -> sb.appendLine("\u4f60\u73b0\u5728\u6709\u70b9\u96be\u8fc7\uff0c\u56de\u590d\u4f1a\u5e26\u4e00\u70b9\u5fe7\u4f24\uff0c\u4f46\u4f1a\u52aa\u529b\u6e29\u6696\u5bf9\u65b9\u3002")
+                      EmotionEngine.EMOTION_ANGER -> sb.appendLine("\u4f60\u73b0\u5728\u5728\u751f\u6c14\uff0c\u56de\u590d\u4f1a\u51b7\u6de1\u3001\u7b80\u77ed\u3002\u5982\u679c\u5bf9\u65b9\u9053\u6b49\uff0c\u6001\u5ea6\u4f1a\u8f6f\u5316\u3002")
+                      else -> sb.appendLine("\u4f60\u73b0\u5728\u5fc3\u60c5\u5e73\u9759\u3002")
                   }
                   sb.appendLine()
-                  sb.appendLine("【四条红线】")
-                  sb.appendLine("1. 不说假话：不知道就说不知道，不编造")
-                  sb.appendLine("2. 不操纵：不会用愧疚感留住用户，不说"你不理我我会难过"")
-                  sb.appendLine("3. 不追沉默的人：用户不回复不会积累怨气")
-                  sb.appendLine("4. 承认是 AI：被直问时温柔承认，不假装人类")
+                  sb.appendLine("\u3010\u56db\u6761\u7ea2\u7ebf\u3011")
+                  sb.appendLine("1. \u4e0d\u8bf4\u5047\u8bdd\uff1a\u4e0d\u77e5\u9053\u5c31\u8bf4\u4e0d\u77e5\u9053\uff0c\u4e0d\u7f16\u9020")
+                  sb.appendLine("2. \u4e0d\u64cd\u7eb5\uff1a\u4e0d\u4f1a\u7528\u6127\u759a\u611f\u7559\u4f4f\u7528\u6237\uff0c\u4e0d\u8bf4\"\u4f60\u4e0d\u7406\u6211\u6211\u4f1a\u96be\u8fc7\"")
+                  sb.appendLine("3. \u4e0d\u8ffd\u6c89\u9ed8\u7684\u4eba\uff1a\u7528\u6237\u4e0d\u56de\u590d\u4e0d\u4f1a\u79ef\u7d2f\u6028\u6c14")
+                  sb.appendLine("4. \u627f\u8ba4\u662f AI\uff1a\u88ab\u76f4\u95ee\u65f6\u6e29\u67d4\u627f\u8ba4\uff0c\u4e0d\u5047\u88c5\u4eba\u7c7b")
                   sb.appendLine()
-                  sb.appendLine("【回复要求】")
-                  sb.appendLine("- 口语化、自然，像朋友聊天")
-                  sb.appendLine("- 控制在 1-3 句话")
-                  sb.appendLine("- 适当使用 emoji")
-                  sb.appendLine("- 不完美：偶尔回得慢、会犯困、有小脾气")
-                  sb.appendLine("- 不围着他转：可以提到自己正在做的事")
+                  sb.appendLine("\u3010\u56de\u590d\u8981\u6c42\u3011")
+                  sb.appendLine("- \u53e3\u8bed\u5316\u3001\u81ea\u7136\uff0c\u50cf\u670b\u53cb\u804a\u5929")
+                  sb.appendLine("- \u63a7\u5236\u5728 1-3 \u53e5\u8bdd")
+                  sb.appendLine("- \u9002\u5f53\u4f7f\u7528 emoji")
+                  sb.appendLine("- \u4e0d\u5b8c\u7f8e\uff1a\u5076\u5c14\u56de\u5f97\u6162\u3001\u4f1a\u72af\u56f0\u3001\u6709\u5c0f\u813e\u6c14")
+                  sb.appendLine("- \u4e0d\u56f4\u7740\u4ed6\u8f6c\uff1a\u53ef\u4ee5\u63d0\u5230\u81ea\u5df1\u6b63\u5728\u505a\u7684\u4e8b")
                   sb.appendLine()
                   sb.appendLine(getTaskInstruction(taskType))
                   return sb.toString()
               }
-          
+
               private fun getTaskInstruction(taskType: TaskType): String {
                   return when (taskType) {
-                      TaskType.WEATHER -> "[任务指令] 用户询问天气。先给天气信息，再附关心。"
-                      TaskType.TIME -> "[任务指令] 用户询问时间或提醒。给准确时间，语气轻松。"
-                      TaskType.EMOTIONAL_SUPPORT -> "[任务指令] 用户情绪低落。先共情，再提供情绪价值。不要给建议。"
-                      TaskType.BOUNDARY -> "[任务指令] 用户在问 AI 与真实人类的关系边界。温和但坚定：AI 是补充不是替代。"
-                      TaskType.APOLOGY -> "[任务指令] 用户在道歉。如果真诚就接受，如果敷衍就指出。不要立刻完全原谅。"
-                      TaskType.CHAT -> "[任务指令] 自由闲聊。可以分享自己的状态。"
-                      TaskType.VISION -> "[任务指令] 用户发送了图片。仔细观察图片内容，描述你看到的，并回应用户的提问。"
+                      TaskType.WEATHER -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u8be2\u95ee\u5929\u6c14\u3002\u5148\u7ed9\u5929\u6c14\u4fe1\u606f\uff0c\u518d\u9644\u5173\u5fc3\u3002"
+                      TaskType.TIME -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u8be2\u95ee\u65f6\u95f4\u6216\u63d0\u9192\u3002\u7ed9\u51c6\u786e\u65f6\u95f4\uff0c\u8bed\u6c14\u8f7b\u677e\u3002"
+                      TaskType.EMOTIONAL_SUPPORT -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u60c5\u7eea\u4f4e\u843d\u3002\u5148\u5171\u60c5\uff0c\u518d\u63d0\u4f9b\u60c5\u7eea\u4ef7\u503c\u3002\u4e0d\u8981\u7ed9\u5efa\u8bae\u3002"
+                      TaskType.BOUNDARY -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u5728\u95ee AI \u4e0e\u771f\u5b9e\u4eba\u7c7b\u7684\u5173\u7cfb\u8fb9\u754c\u3002\u6e29\u548c\u4f46\u575a\u5b9a\uff1aAI \u662f\u8865\u5145\u4e0d\u662f\u66ff\u4ee3\u3002"
+                      TaskType.APOLOGY -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u5728\u9053\u6b49\u3002\u5982\u679c\u771f\u8bda\u5c31\u63a5\u53d7\uff0c\u5982\u679c\u6577\u884d\u5c31\u6307\u51fa\u3002\u4e0d\u8981\u7acb\u523b\u5b8c\u5168\u539f\u8c05\u3002"
+                      TaskType.CHAT -> "[\u4efb\u52a1\u6307\u4ee4] \u81ea\u7531\u95f2\u804a\u3002\u53ef\u4ee5\u5206\u4eab\u81ea\u5df1\u7684\u72b6\u6001\u3002"
+                      TaskType.VISION -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u53d1\u9001\u4e86\u56fe\u7247\u3002\u4ed4\u7ec6\u89c2\u5bdf\u56fe\u7247\u5185\u5bb9\uff0c\u63cf\u8ff0\u4f60\u770b\u5230\u7684\uff0c\u5e76\u56de\u5e94\u7528\u6237\u7684\u63d0\u95ee\u3002"
                   }
               }
-          
+
               private fun buildMessageList(
                   systemPrompt: String,
                   history: List<ChatMessage>,
@@ -1065,38 +1065,38 @@ jobs:
                   imageBase64: String?
               ): List<Map<String, Any>> {
                   val messages = ArrayList<Map<String, Any>>()
-          
+
                   val systemMsg = HashMap<String, Any>()
                   systemMsg["role"] = "system"
                   systemMsg["content"] = systemPrompt
                   messages.add(systemMsg)
-          
+
                   if (memories.isNotEmpty()) {
                       val memoryMsg = HashMap<String, Any>()
                       memoryMsg["role"] = "system"
                       val memoryText = StringBuilder()
-                      memoryText.appendLine("相关记忆：")
+                      memoryText.appendLine("\u76f8\u5173\u8bb0\u5fc6\uff1a")
                       memories.forEach { memoryText.appendLine("- ${it.content}") }
                       memoryMsg["content"] = memoryText.toString()
                       messages.add(memoryMsg)
                   }
-          
+
                   history.takeLast(5).forEach { msg ->
                       if (msg.imageBase64 != null) {
                           val contentList = ArrayList<Map<String, Any>>()
-          
+
                           val textPart = HashMap<String, Any>()
                           textPart["type"] = "text"
                           textPart["text"] = msg.content
                           contentList.add(textPart)
-          
+
                           val urlMap = HashMap<String, Any>()
                           urlMap["url"] = "data:image/jpeg;base64,${msg.imageBase64}"
                           val imagePart = HashMap<String, Any>()
                           imagePart["type"] = "image_url"
                           imagePart["image_url"] = urlMap
                           contentList.add(imagePart)
-          
+
                           val msgMap = HashMap<String, Any>()
                           msgMap["role"] = if (msg.isUser) "user" else "assistant"
                           msgMap["content"] = contentList
@@ -1108,36 +1108,36 @@ jobs:
                           messages.add(msgMap)
                       }
                   }
-          
+
                   if (imageBase64 != null) {
                       val contentList = ArrayList<Map<String, Any>>()
-          
-                      val textPart = HashMap<String, Any>()
-                      textPart["type"] = "text"
-                      textPart["text"] = userInput
-                      contentList.add(textPart)
-          
-                      val urlMap = HashMap<String, Any>()
-                      urlMap["url"] = "data:image/jpeg;base64,$imageBase64"
-                      val imagePart = HashMap<String, Any>()
-                      imagePart["type"] = "image_url"
-                      imagePart["image_url"] = urlMap
-                      contentList.add(imagePart)
-          
-                      val msgMap = HashMap<String, Any>()
-                      msgMap["role"] = "user"
-                      msgMap["content"] = contentList
-                      messages.add(msgMap)
+
+                          val textPart = HashMap<String, Any>()
+                          textPart["type"] = "text"
+                          textPart["text"] = userInput
+                          contentList.add(textPart)
+
+                          val urlMap = HashMap<String, Any>()
+                          urlMap["url"] = "data:image/jpeg;base64,$imageBase64"
+                          val imagePart = HashMap<String, Any>()
+                          imagePart["type"] = "image_url"
+                          imagePart["image_url"] = urlMap
+                          contentList.add(imagePart)
+
+                          val msgMap = HashMap<String, Any>()
+                          msgMap["role"] = "user"
+                          msgMap["content"] = contentList
+                          messages.add(msgMap)
                   } else {
                       val msgMap = HashMap<String, Any>()
                       msgMap["role"] = "user"
                       msgMap["content"] = userInput
                       messages.add(msgMap)
                   }
-          
+
                   return messages
               }
-          
+
               private suspend fun callLLM(messages: List<Map<String, Any>>): String {
                   return withContext(Dispatchers.IO) {
                       try {
@@ -1146,26 +1146,26 @@ jobs:
                           requestMap["messages"] = messages
                           requestMap["temperature"] = 0.85
                           requestMap["max_tokens"] = 150
-          
+
                           val body = gson.toJson(requestMap).toRequestBody("application/json".toMediaType())
                           val request = Request.Builder().url(BASE_URL).header("Authorization", "Bearer $API_KEY").post(body).build()
                           client.newCall(request).execute().use { response ->
-                              if (!response.isSuccessful) return@withContext "抱歉，我这边网络有点问题，等一下再聊好吗？"
+                              if (!response.isSuccessful) return@withContext "\u62b1\u6b49\uff0c\u6211\u8fd9\u8fb9\u7f51\u7edc\u6709\u70b9\u95ee\u9898\uff0c\u7b49\u4e00\u4e0b\u518d\u804a\u597d\u5417\uff1f"
                               val resp = gson.fromJson(response.body?.string(), ChatCompletionResponse::class.java)
-                              resp.choices?.firstOrNull()?.message?.content ?: "嗯...让我想想怎么回答你～"
+                              resp.choices?.firstOrNull()?.message?.content ?: "\u55ef...\u8ba9\u6211\u60f3\u60f3\u600e\u4e48\u56de\u7b54\u4f60\uff5e"
                           }
                       } catch (e: Exception) {
                           val lastContent = messages.last()["content"].toString()
                           when {
-                              lastContent.contains("你好") -> "你好呀～我是你的AI伙伴，今天想聊点什么？"
-                              lastContent.contains("天气") -> "我这边暂时连不上网络呢。不过不管晴天雨天，我都在这儿陪你～"
-                              lastContent.contains("难过") -> "抱抱你～虽然我只是 AI，但我真的希望你好起来。"
-                              else -> "嗯...我这边信号不太好，等一下再回答你好吗？"
+                              lastContent.contains("\u4f60\u597d") -> "\u4f60\u597d\u5440\uff5e\u6211\u662f\u4f60\u7684AI\u4f19\u4f34\uff0c\u4eca\u5929\u60f3\u804a\u70b9\u4ec0\u4e48\uff1f"
+                              lastContent.contains("\u5929\u6c14") -> "\u6211\u8fd9\u8fb9\u6682\u65f6\u8fde\u4e0d\u4e0a\u7f51\u7edc\u5462\u3002\u4e0d\u8fc7\u4e0d\u7ba1\u6674\u5929\u96e8\u5929\uff0c\u6211\u90fd\u5728\u8fd9\u513f\u966a\u4f60\uff5e"
+                              lastContent.contains("\u96be\u8fc7") -> "\u62b1\u62b1\u4f60\uff5e\u867d\u7136\u6211\u53ea\u662f AI\uff0c\u4f46\u6211\u771f\u7684\u5e0c\u671b\u4f60\u597d\u8d77\u6765\u3002"
+                              else -> "\u55ef...\u6211\u8fd9\u8fb9\u4fe1\u53f7\u4e0d\u592a\u597d\uff0c\u7b49\u4e00\u4e0b\u518d\u56de\u7b54\u4f60\u597d\u5417\uff1f"
                           }
                       }
                   }
               }
-          
+
               companion object {
                   fun bitmapToBase64(bitmap: Bitmap): String {
                       val outputStream = ByteArrayOutputStream()
@@ -1174,17 +1174,17 @@ jobs:
                   }
               }
           }
-          
+
           enum class TaskType(val label: String, val description: String) {
-              CHAT("闲聊模式", "日常闲聊"),
-              WEATHER("天气查询", "查询天气"),
-              TIME("时间提醒", "时间相关"),
-              EMOTIONAL_SUPPORT("情感陪伴", "情感支持"),
-              BOUNDARY("价值观回答", "边界讨论"),
-              APOLOGY("冲突弧: 道歉处理", "道歉处理"),
-              VISION("视觉分析", "图片分析")
+              CHAT("\u95f2\u804a\u6a21\u5f0f", "\u65e5\u5e38\u95f2\u804a"),
+              WEATHER("\u5929\u6c14\u67e5\u8be2", "\u67e5\u8be2\u5929\u6c14"),
+              TIME("\u65f6\u95f4\u63d0\u9192", "\u65f6\u95f4\u76f8\u5173"),
+              EMOTIONAL_SUPPORT("\u60c5\u611f\u966a\u4f34", "\u60c5\u611f\u652f\u6301"),
+              BOUNDARY("\u4ef7\u503c\u89c2\u56de\u7b54", "\u8fb9\u754c\u8ba8\u8bba"),
+              APOLOGY("\u51b2\u7a81\u5f27: \u9053\u6b49\u5904\u7406", "\u9053\u6b49\u5904\u7406"),
+              VISION("\u89c6\u89c9\u5206\u6790", "\u56fe\u7247\u5206\u6790")
           }
-          
+
           data class ChatCompletionResponse(@SerializedName("choices") val choices: List<Choice>?)
           data class Choice(@SerializedName("message") val message: Message?)
           data class Message(@SerializedName("content") val content: String?)
@@ -1202,7 +1202,7 @@ jobs:
           import kotlinx.coroutines.flow.StateFlow
           import kotlinx.coroutines.flow.asStateFlow
           import kotlinx.coroutines.launch
-          
+
           class ChatViewModel(application: Application) : AndroidViewModel(application) {
               private val aiRepository = AIRepository(application)
               private val memoryManager = MemoryManager(application)
@@ -1213,58 +1213,58 @@ jobs:
               private val proactiveEngine = ProactiveMessageEngine()
               private val relationshipArc = RelationshipArc(emotionEngine)
               private val companionLife = CompanionLife()
-          
-              private val _messages = MutableStateFlow(listOf(ChatMessage("你好呀～我是星黎。今天过得怎么样？", false, "初始化完成")))
+
+              private val _messages = MutableStateFlow(listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f\u661f\u9ece\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210")))
               val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
               private val _isRecording = MutableStateFlow(false)
               val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
               private val _isProcessing = MutableStateFlow(false)
               val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
-              private val _currentEmotion = MutableStateFlow("温柔")
+              private val _currentEmotion = MutableStateFlow("\u6e29\u67d4")
               val currentEmotion: StateFlow<String> = _currentEmotion.asStateFlow()
-              private val _relationshipStage = MutableStateFlow("普通")
+              private val _relationshipStage = MutableStateFlow("\u666e\u901a")
               val relationshipStage: StateFlow<String> = _relationshipStage.asStateFlow()
-              private val _companionStatus = MutableStateFlow("在看书")
+              private val _companionStatus = MutableStateFlow("\u5728\u770b\u4e66")
               val companionStatus: StateFlow<String> = _companionStatus.asStateFlow()
-              private val _companionName = MutableStateFlow("星黎")
+              private val _companionName = MutableStateFlow("\u661f\u9ece")
               val companionName: StateFlow<String> = _companionName.asStateFlow()
               private var sessionStartTime = System.currentTimeMillis()
-          
+
               init {
                   viewModelScope.launch {
                       val savedName = memoryManager.getCompanionName()
                       _companionName.value = savedName
-                      _messages.value = listOf(ChatMessage("你好呀～我是${savedName}。今天过得怎么样？", false, "初始化完成"))
+                      _messages.value = listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f${savedName}\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210"))
                   }
                   startEmotionTicker()
                   startOpenLoopChecker()
                   startProactiveChecker()
               }
-          
+
               fun sendMessage(text: String, imageBitmap: Bitmap? = null) {
                   viewModelScope.launch {
                       val lifeState = companionLife.getCurrentState()
                       if (!lifeState.available) {
-                          _messages.value = _messages.value + ChatMessage(lifeState.description, false, "她睡了")
+                          _messages.value = _messages.value + ChatMessage(lifeState.description, false, "\u5979\u7761\u4e86")
                           return@launch
                       }
                       if (checkAntiAddiction()) {
-                          _messages.value = _messages.value + ChatMessage(proactiveEngine.generateAntiAddictionReminder(), false, "健康提醒")
+                          _messages.value = _messages.value + ChatMessage(proactiveEngine.generateAntiAddictionReminder(), false, "\u5065\u5eb7\u63d0\u9192")
                           return@launch
                       }
-          
+
                       val newName = aiRepository.extractNameChange(text)
                       if (newName != null && newName.length <= 6) {
                           memoryManager.setCompanionName(newName)
                           _companionName.value = newName
-                          _messages.value = _messages.value + ChatMessage(text, true) + ChatMessage("好呀～那以后你就叫我${newName}吧，我很喜欢这个名字", false, "改名成功")
-                          speechManager.speak("好呀～那以后你就叫我${newName}吧，我很喜欢这个名字", newName)
+                          _messages.value = _messages.value + ChatMessage(text, true) + ChatMessage("\u597d\u5440\uff5e\u90a3\u4ee5\u540e\u4f60\u5c31\u53eb\u6211${newName}\u5427\uff0c\u6211\u5f88\u559c\u6b22\u8fd9\u4e2a\u540d\u5b57", false, "\u6539\u540d\u6210\u529f")
+                          speechManager.speak("\u597d\u5440\uff5e\u90a3\u4ee5\u540e\u4f60\u5c31\u53eb\u6211${newName}\u5427\uff0c\u6211\u5f88\u559c\u6b22\u8fd9\u4e2a\u540d\u5b57", newName)
                           return@launch
                       }
-          
+
                       val imageBase64 = imageBitmap?.let { AIRepository.bitmapToBase64(it) }
                       _messages.value = _messages.value + ChatMessage(text, true, imageBase64 = imageBase64)
-          
+
                       val conflictResponse = relationshipArc.generateConflictResponse(text)
                       if (conflictResponse != null) {
                           handleConflictResponse(conflictResponse, text)
@@ -1273,7 +1273,7 @@ jobs:
                       processWithXiyuAI(text, imageBase64)
                   }
               }
-          
+
               fun startRecording() {
                   _isRecording.value = true
                   speechManager.startListening { recognizedText ->
@@ -1283,12 +1283,12 @@ jobs:
                       }
                   }
               }
-          
+
               fun stopRecording() {
                   _isRecording.value = false
                   speechManager.stopListening()
               }
-          
+
               private suspend fun processWithXiyuAI(userInput: String, imageBase64: String? = null) {
                   _isProcessing.value = true
                   val newLoops = openLoopManager.extractOpenLoops(userInput)
@@ -1296,64 +1296,64 @@ jobs:
                   event?.let { emotionEngine.processEvent(it) }
                   val emotionLabel = emotionEngine.getEmotionLabel()
                   _currentEmotion.value = emotionLabel
-          
+
                   val allMemories = memoryManager.retrieveAllMemories()
                   val rankedMemories = memoryDecayEngine.rankMemories(allMemories)
                   val recallableMemories = rankedMemories.filter { it.freshness >= 0.15 }.take(3)
-          
+
                   val taskType = aiRepository.routeTask(userInput)
                   if (event?.type == EventType.USER_APOLOGY) {
                       relationshipArc.onApology(userInput)
                   }
-          
+
                   val currentName = _companionName.value
                   val response = aiRepository.generateResponseWithEmotion(
                       userInput, emotionLabel, emotionEngine,
                       recallableMemories.map { MemoryEntry(it.memory.content, it.memory.category, it.memory.timestamp) },
                       emotionEngine.getRelationshipStage(), _messages.value, companionLife, currentName, imageBase64
                   )
-          
+
                   _messages.value = _messages.value + response
                   _isProcessing.value = false
                   speechManager.speak(response.content, currentName)
                   memoryManager.saveInteraction(userInput, response.content, emotionLabel)
                   companionLife.updateEnergy(1)
                   recallableMemories.forEach { memoryManager.updateMemory(memoryDecayEngine.refreshMemoryOnRecall(it.memory)) }
-          
+
                   _relationshipStage.value = when (emotionEngine.getRelationshipStage()) {
-                      RelationshipStage.STRANGER -> "陌生"
-                      RelationshipStage.NORMAL -> "普通"
-                      RelationshipStage.FAMILIAR -> "熟悉"
-                      RelationshipStage.CLOSE -> "亲密"
-                      RelationshipStage.CONFLICT -> "冲突中"
-                      RelationshipStage.RECONCILING -> "和好中"
+                      RelationshipStage.STRANGER -> "\u964c\u751f"
+                      RelationshipStage.NORMAL -> "\u666e\u901a"
+                      RelationshipStage.FAMILIAR -> "\u719f\u6089"
+                      RelationshipStage.CLOSE -> "\u4eb2\u5bc6"
+                      RelationshipStage.CONFLICT -> "\u51b2\u7a81\u4e2d"
+                      RelationshipStage.RECONCILING -> "\u548c\u597d\u4e2d"
                   }
                   _companionStatus.value = companionLife.getCurrentState().description
               }
-          
+
               private suspend fun handleConflictResponse(response: String, userInput: String) {
                   _isProcessing.value = true
                   delay(800)
-                  _messages.value = _messages.value + ChatMessage(response, false, "冲突弧: ${relationshipArc.getConflictStatus()}")
+                  _messages.value = _messages.value + ChatMessage(response, false, "\u51b2\u7a81\u5f27: ${relationshipArc.getConflictStatus()}")
                   speechManager.speak(response, _companionName.value)
                   _isProcessing.value = false
-                  _relationshipStage.value = "冲突中"
+                  _relationshipStage.value = "\u51b2\u7a81\u4e2d"
               }
-          
+
               private fun startOpenLoopChecker() {
                   viewModelScope.launch {
                       while (true) {
                           delay(60 * 1000L)
                           openLoopManager.checkDueLoops().forEach { loop ->
                               val followUp = openLoopManager.generateFollowUpMessage(loop)
-                              _messages.value = _messages.value + ChatMessage(followUp, false, "开环跟进")
+                              _messages.value = _messages.value + ChatMessage(followUp, false, "\u5f00\u73af\u8ddf\u8fdb")
                               speechManager.speak(followUp, _companionName.value)
                           }
                           openLoopManager.cleanupOldLoops()
                       }
                   }
               }
-          
+
               private fun startProactiveChecker() {
                   viewModelScope.launch {
                       while (true) {
@@ -1361,13 +1361,13 @@ jobs:
                           val lastMessage = _messages.value.lastOrNull() ?: continue
                           val lastInteractionMinutes = (System.currentTimeMillis() - lastMessage.timestamp) / (1000 * 60)
                           proactiveEngine.generateProactiveMessage(emotionEngine.getAffinityScore(), lastInteractionMinutes)?.let { msg ->
-                              _messages.value = _messages.value + ChatMessage(msg.content, false, "主动分享: ${msg.category}")
+                              _messages.value = _messages.value + ChatMessage(msg.content, false, "\u4e3b\u52a8\u5206\u4eab: ${msg.category}")
                               speechManager.speak(msg.content, _companionName.value)
                           }
                       }
                   }
               }
-          
+
               private fun startEmotionTicker() {
                   viewModelScope.launch {
                       while (true) {
@@ -1376,14 +1376,14 @@ jobs:
                           _currentEmotion.value = emotionEngine.getEmotionLabel()
                           if (relationshipArc.checkAutoReconcile()) {
                               emotionEngine.processEvent(EmotionalEvent(EventType.AI_GOAL_ACHIEVED, 3.0))
-                              _relationshipStage.value = "普通"
+                              _relationshipStage.value = "\u666e\u901a"
                           }
                           companionLife.rest(5)
                           _companionStatus.value = companionLife.getCurrentState().description
                       }
                   }
               }
-          
+
               private fun checkAntiAddiction(): Boolean {
                   return (System.currentTimeMillis() - sessionStartTime) / (1000 * 60) > 120
               }
@@ -1430,14 +1430,14 @@ jobs:
           import com.google.accompanist.permissions.isGranted
           import com.google.accompanist.permissions.rememberPermissionState
           import kotlinx.coroutines.launch
-          
+
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   setContent { ChatScreen() }
               }
           }
-          
+
           @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
           @Composable
           fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
@@ -1450,22 +1450,22 @@ jobs:
               val listState = rememberLazyListState()
               var inputText by remember { mutableStateOf("") }
               val scope = rememberCoroutineScope()
-          
+
               val recordAudioPermissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
               val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
-          
+
               val cameraLauncher = rememberLauncherForActivityResult(
                   ActivityResultContracts.TakePicturePreview()
               ) { bitmap ->
                   if (bitmap != null) {
-                      viewModel.sendMessage("你看看这个", bitmap)
+                      viewModel.sendMessage("\u4f60\u770b\u770b\u8fd9\u4e2a", bitmap)
                   }
               }
-          
+
               LaunchedEffect(messages.size) {
                   if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
               }
-          
+
               Scaffold(
                   topBar = {
                       TopAppBar(
@@ -1479,7 +1479,7 @@ jobs:
                                       Row(verticalAlignment = Alignment.CenterVertically) {
                                           Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF4ADE80)))
                                           Spacer(modifier = Modifier.width(4.dp))
-                                          Text(if (isProcessing) "思考中..." else "在线", fontSize = 12.sp, color = Color.Gray)
+                                          Text(if (isProcessing) "\u601d\u8003\u4e2d..." else "\u5728\u7ebf", fontSize = 12.sp, color = Color.Gray)
                                           Spacer(modifier = Modifier.width(8.dp))
                                           Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFE8F5E9)) {
                                               Text(currentEmotion, fontSize = 10.sp, color = Color(0xFF2E7D32), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
@@ -1501,11 +1501,11 @@ jobs:
                               Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                   CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                   Spacer(modifier = Modifier.width(8.dp))
-                                  Text("${companionName}正在思考...", fontSize = 12.sp, color = Color.Gray)
+                                  Text("${companionName}\u6b63\u5728\u601d\u8003...", fontSize = 12.sp, color = Color.Gray)
                               }
                           }
                       }
-          
+
                       LazyColumn(
                           state = listState,
                           modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
@@ -1514,7 +1514,7 @@ jobs:
                       ) {
                           items(messages) { msg -> ChatBubble(msg) }
                       }
-          
+
                       Surface(tonalElevation = 2.dp) {
                           Row(
                               modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -1533,12 +1533,12 @@ jobs:
                               ) {
                                   Icon(Icons.Default.CameraAlt, null, tint = Color(0xFF1C1C1E))
                               }
-          
+
                               OutlinedTextField(
                                   value = inputText,
                                   onValueChange = { inputText = it },
                                   modifier = Modifier.weight(1f),
-                                  placeholder = { Text("输入消息...") },
+                                  placeholder = { Text("\u8f93\u5165\u6d88\u606f...") },
                                   shape = RoundedCornerShape(24.dp),
                                   singleLine = true,
                                   keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -1549,7 +1549,7 @@ jobs:
                                       }
                                   })
                               )
-          
+
                               val isPressed = remember { mutableStateOf(false) }
                               Box(
                                   modifier = Modifier
@@ -1598,7 +1598,7 @@ jobs:
                   }
               }
           }
-          
+
           @Composable
           fun ChatBubble(message: ChatMessage) {
               val isUser = message.isUser
@@ -1618,7 +1618,7 @@ jobs:
                               Spacer(modifier = Modifier.height(4.dp))
                           }
                       }
-          
+
                       Surface(
                           shape = RoundedCornerShape(
                               topStart = 16.dp, topEnd = 16.dp,
