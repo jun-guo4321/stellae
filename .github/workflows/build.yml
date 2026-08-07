@@ -997,7 +997,7 @@ jobs:
                       RelationshipStage.CONFLICT -> "冲突中"
                       RelationshipStage.RECONCILING -> "和好中"
                   }
-                  return buildString {
+                  val base = buildString {
                       appendLine("你是"$companionName"，一个尽力像真人的 AI 陪伴者。")
                       appendLine()
                       appendLine("【核心人设】")
@@ -1040,7 +1040,8 @@ jobs:
                       appendLine("- 适当使用 emoji")
                       appendLine("- 不完美：偶尔回得慢、会犯困、有小脾气")
                       appendLine("- 不围着他转：可以提到自己正在做的事")
-                  }.toString() + when (taskType) {
+                  }
+                  val taskInstruction = when (taskType) {
                       TaskType.WEATHER -> "
           
           [任务指令] 用户询问天气。先给天气信息，再附关心。"
@@ -1063,6 +1064,7 @@ jobs:
           
           [任务指令] 用户发送了图片。仔细观察图片内容，描述你看到的，并回应用户的提问。"
                   }
+                  return base + taskInstruction
               }
           
               private fun buildMessageList(
@@ -1072,43 +1074,89 @@ jobs:
                   memories: List<MemoryEntry>,
                   imageBase64: String?
               ): List<Map<String, Any>> {
-                  val messages = mutableListOf<Map<String, Any>>()
-                  messages.add(mapOf("role" to "system", "content" to systemPrompt))
+                  val messages = ArrayList<Map<String, Any>>()
+          
+                  val systemMsg = HashMap<String, Any>()
+                  systemMsg["role"] = "system"
+                  systemMsg["content"] = systemPrompt
+                  messages.add(systemMsg)
+          
                   if (memories.isNotEmpty()) {
-                      messages.add(mapOf("role" to "system", "content" to "相关记忆：
-          ${memories.joinToString("
-          ") { "- ${it.content}" }}"))
+                      val memoryMsg = HashMap<String, Any>()
+                      memoryMsg["role"] = "system"
+                      memoryMsg["content"] = "相关记忆：
+          " + memories.joinToString("
+          ") { "- ${it.content}" }
+                      messages.add(memoryMsg)
                   }
+          
                   history.takeLast(5).forEach { msg ->
                       if (msg.imageBase64 != null) {
-                          val contentList = mutableListOf<Map<String, Any>>()
-                          contentList.add(mapOf("type" to "text", "text" to msg.content))
-                          contentList.add(mapOf("type" to "image_url", "image_url" to mapOf("url" to "data:image/jpeg;base64,${msg.imageBase64}")))
-                          messages.add(mapOf("role" to if (msg.isUser) "user" else "assistant", "content" to contentList))
+                          val contentList = ArrayList<Map<String, Any>>()
+          
+                          val textPart = HashMap<String, Any>()
+                          textPart["type"] = "text"
+                          textPart["text"] = msg.content
+                          contentList.add(textPart)
+          
+                          val urlMap = HashMap<String, Any>()
+                          urlMap["url"] = "data:image/jpeg;base64,${msg.imageBase64}"
+                          val imagePart = HashMap<String, Any>()
+                          imagePart["type"] = "image_url"
+                          imagePart["image_url"] = urlMap
+                          contentList.add(imagePart)
+          
+                          val msgMap = HashMap<String, Any>()
+                          msgMap["role"] = if (msg.isUser) "user" else "assistant"
+                          msgMap["content"] = contentList
+                          messages.add(msgMap)
                       } else {
-                          messages.add(mapOf("role" to if (msg.isUser) "user" else "assistant", "content" to msg.content))
+                          val msgMap = HashMap<String, Any>()
+                          msgMap["role"] = if (msg.isUser) "user" else "assistant"
+                          msgMap["content"] = msg.content
+                          messages.add(msgMap)
                       }
                   }
+          
                   if (imageBase64 != null) {
-                      val contentList = mutableListOf<Map<String, Any>>()
-                      contentList.add(mapOf("type" to "text", "text" to userInput))
-                      contentList.add(mapOf("type" to "image_url", "image_url" to mapOf("url" to "data:image/jpeg;base64,$imageBase64")))
-                      messages.add(mapOf("role" to "user", "content" to contentList))
+                      val contentList = ArrayList<Map<String, Any>>()
+          
+                      val textPart = HashMap<String, Any>()
+                      textPart["type"] = "text"
+                      textPart["text"] = userInput
+                      contentList.add(textPart)
+          
+                      val urlMap = HashMap<String, Any>()
+                      urlMap["url"] = "data:image/jpeg;base64,$imageBase64"
+                      val imagePart = HashMap<String, Any>()
+                      imagePart["type"] = "image_url"
+                      imagePart["image_url"] = urlMap
+                      contentList.add(imagePart)
+          
+                      val msgMap = HashMap<String, Any>()
+                      msgMap["role"] = "user"
+                      msgMap["content"] = contentList
+                      messages.add(msgMap)
                   } else {
-                      messages.add(mapOf("role" to "user", "content" to userInput))
+                      val msgMap = HashMap<String, Any>()
+                      msgMap["role"] = "user"
+                      msgMap["content"] = userInput
+                      messages.add(msgMap)
                   }
+          
                   return messages
               }
           
               private suspend fun callLLM(messages: List<Map<String, Any>>): String {
                   return withContext(Dispatchers.IO) {
                       try {
-                          val body = gson.toJson(mapOf(
-                              "model" to "ep-20260807115902-67t9m",
-                              "messages" to messages,
-                              "temperature" to 0.85,
-                              "max_tokens" to 150
-                          )).toRequestBody("application/json".toMediaType())
+                          val requestMap = HashMap<String, Any>()
+                          requestMap["model"] = "ep-20260807115902-67t9m"
+                          requestMap["messages"] = messages
+                          requestMap["temperature"] = 0.85
+                          requestMap["max_tokens"] = 150
+          
+                          val body = gson.toJson(requestMap).toRequestBody("application/json".toMediaType())
                           val request = Request.Builder().url(BASE_URL).header("Authorization", "Bearer $API_KEY").post(body).build()
                           client.newCall(request).execute().use { response ->
                               if (!response.isSuccessful) return@withContext "抱歉，我这边网络有点问题，等一下再聊好吗？"
@@ -1116,10 +1164,11 @@ jobs:
                               resp.choices?.firstOrNull()?.message?.content ?: "嗯...让我想想怎么回答你～"
                           }
                       } catch (e: Exception) {
+                          val lastContent = messages.last()["content"].toString()
                           when {
-                              messages.last()["content"]?.toString()?.contains("你好") == true -> "你好呀～我是你的AI伙伴，今天想聊点什么？"
-                              messages.last()["content"]?.toString()?.contains("天气") == true -> "我这边暂时连不上网络呢。不过不管晴天雨天，我都在这儿陪你～"
-                              messages.last()["content"]?.toString()?.contains("难过") == true -> "抱抱你～虽然我只是 AI，但我真的希望你好起来。"
+                              lastContent.contains("你好") -> "你好呀～我是你的AI伙伴，今天想聊点什么？"
+                              lastContent.contains("天气") -> "我这边暂时连不上网络呢。不过不管晴天雨天，我都在这儿陪你～"
+                              lastContent.contains("难过") -> "抱抱你～虽然我只是 AI，但我真的希望你好起来。"
                               else -> "嗯...我这边信号不太好，等一下再回答你好吗？"
                           }
                       }
