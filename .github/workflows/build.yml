@@ -1048,21 +1048,11 @@ jobs:
                       TaskType.TIME -> "
           
           [任务指令] 用户询问时间或提醒。给准确时间，语气轻松。"
-                      TaskType.EMOTIONAL_SUPPORT -> "
-          
-          [任务指令] 用户情绪低落。先共情，再提供情绪价值。不要给建议。"
-                      TaskType.BOUNDARY -> "
-          
-          [任务指令] 用户在问 AI 与真实人类的关系边界。温和但坚定：AI 是补充不是替代。"
-                      TaskType.APOLOGY -> "
-          
-          [任务指令] 用户在道歉。如果真诚就接受，如果敷衍就指出。不要立刻完全原谅。"
-                      TaskType.CHAT -> "
-          
-          [任务指令] 自由闲聊。可以分享自己的状态。"
-                      TaskType.VISION -> "
-          
-          [任务指令] 用户发送了图片。仔细观察图片内容，描述你看到的，并回应用户的提问。"
+                      TaskType.EMOTIONAL_SUPPORT -> "\n\n[任务指令] 用户情绪低落。先共情，再提供情绪价值。不要给建议。"
+                      TaskType.BOUNDARY -> "\n\n[任务指令] 用户在问 AI 与真实人类的关系边界。温和但坚定：AI 是补充不是替代。"
+                      TaskType.APOLOGY -> "\n\n[任务指令] 用户在道歉。如果真诚就接受，如果敷衍就指出。不要立刻完全原谅。"
+                      TaskType.CHAT -> "\n\n[任务指令] 自由闲聊。可以分享自己的状态。"
+                      TaskType.VISION -> "\n\n[任务指令] 用户发送了图片。仔细观察图片内容，描述你看到的，并回应用户的提问。"
                   }
                   return base + taskInstruction
               }
@@ -1084,9 +1074,7 @@ jobs:
                   if (memories.isNotEmpty()) {
                       val memoryMsg = HashMap<String, Any>()
                       memoryMsg["role"] = "system"
-                      memoryMsg["content"] = "相关记忆：
-          " + memories.joinToString("
-          ") { "- ${it.content}" }
+                      memoryMsg["content"] = "相关记忆：\n" + memories.joinToString("\n") { "- ${it.content}" }
                       messages.add(memoryMsg)
                   }
           
