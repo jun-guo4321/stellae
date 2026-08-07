@@ -82,8 +82,10 @@ jobs:
               implementation("androidx.camera:camera-view:1.3.1")
               // 定位依赖
               implementation("com.google.android.gms:play-services-location:21.0.1")
-              // 协程与 Play Services 集成（修复 await() 问题）
+              // 协程与 Play Services 集成
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+              // WebSocket 依赖 (用于实时语音)
+              implementation("com.squareup.okhttp3:okhttp:4.12.0")
           }
           EOF
       - run: |
@@ -121,6 +123,8 @@ jobs:
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
                   </activity>
+                  <!-- 新增服务用于实时语音（骨架） -->
+                  <service android:name=".VoiceInteractionService" android:enabled="true" android:exported="false" />
               </application>
           </manifest>
           EOF
@@ -1275,7 +1279,7 @@ jobs:
           data class LocationInfo(val city: String, val district: String, val address: String, val lat: Double, val lon: Double)
           EOF
 
-      # 8. ChatViewModel（已修正：导入 await，previewVoice 改为普通函数，定位修复）
+      # 8. ChatViewModel（已修正，添加实时语音骨架）
       - run: |
           cat > app/src/main/java/com/example/stellae/ChatViewModel.kt << 'EOF'
           package com.example.stellae
@@ -1297,7 +1301,7 @@ jobs:
           import kotlinx.coroutines.flow.asStateFlow
           import kotlinx.coroutines.launch
           import kotlinx.coroutines.runBlocking
-          import kotlinx.coroutines.tasks.await  // 关键：导入 await 扩展
+          import kotlinx.coroutines.tasks.await
           import okhttp3.OkHttpClient
           import okhttp3.Request
           import com.google.gson.Gson
@@ -1314,6 +1318,10 @@ jobs:
               private val companionLife = CompanionLife()
               private val fusedLocationClient: FusedLocationProviderClient =
                   LocationServices.getFusedLocationProviderClient(application)
+
+              // 实时语音对话状态
+              private val _isInVoiceCall = MutableStateFlow(false)
+              val isInVoiceCall: StateFlow<Boolean> = _isInVoiceCall.asStateFlow()
 
               private val _messages = MutableStateFlow(listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f\u661f\u9ece\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210")))
               val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -1346,7 +1354,7 @@ jobs:
                   startProactiveChecker()
               }
 
-              // === 设置方法（全部普通函数，内部启动协程） ===
+              // === 设置方法 ===
               fun setCompanionName(name: String) {
                   viewModelScope.launch {
                       memoryManager.setCompanionName(name)
@@ -1364,12 +1372,34 @@ jobs:
               fun getRelation(): String = runBlocking { memoryManager.getSetting("relation") ?: "\u670b\u53cb" }
               fun setRelation(r: String) { viewModelScope.launch { memoryManager.setSetting("relation", r) } }
 
-              // 音色试听（普通函数）
               fun previewVoice(voice: String) {
                   viewModelScope.launch { speechManager.previewVoice(voice) }
               }
 
-              // 定位
+              // === 实时语音对话（骨架）===
+              // TODO: 参考 xiaozhi-android-native 或 VoiceRobot 实现 WebSocket 实时语音流
+              fun toggleVoiceCall() {
+                  if (_isInVoiceCall.value) {
+                      endVoiceCall()
+                  } else {
+                      startVoiceCall()
+                  }
+              }
+
+              private fun startVoiceCall() {
+                  _isInVoiceCall.value = true
+                  _messages.value = _messages.value + ChatMessage("📞 正在建立语音通话...", false, "语音通话")
+                  // TODO: 建立 WebSocket 连接，开始实时音频流
+                  // 可参考: https://github.com/DayanJ/xiaozhi-android-native
+              }
+
+              private fun endVoiceCall() {
+                  _isInVoiceCall.value = false
+                  _messages.value = _messages.value + ChatMessage("📞 语音通话已结束", false, "语音通话")
+                  // TODO: 关闭 WebSocket 连接，释放音频资源
+              }
+
+              // === 定位 ===
               private suspend fun fetchLocation() {
                   try {
                       if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION)
@@ -1418,6 +1448,7 @@ jobs:
                   viewModelScope.launch { fetchLocation() }
               }
 
+              // === 消息发送 ===
               fun sendMessage(text: String, imageBitmap: Bitmap? = null) {
                   viewModelScope.launch {
                       val lifeState = companionLife.getCurrentState()
@@ -1455,18 +1486,15 @@ jobs:
                   }
               }
 
-              // 点击录音：开始/停止
+              // === 点击录音 ===
               fun toggleRecording() {
                   if (_isRecording.value) {
-                      // 停止录音并发送
                       stopRecording()
                   } else {
-                      // 检查权限
                       if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.RECORD_AUDIO)
                           == PackageManager.PERMISSION_GRANTED) {
                           startRecording()
                       } else {
-                          // 权限请求由 Activity 处理，这里只标记
                           _isRecording.value = false
                       }
                   }
@@ -1475,7 +1503,6 @@ jobs:
               fun cancelRecording() {
                   if (_isRecording.value) {
                       stopRecording()
-                      // 不发送，丢弃识别结果
                   }
               }
 
@@ -1600,7 +1627,7 @@ jobs:
           }
           EOF
 
-      # 9. SettingsScreen（修正 previewVoice 调用）
+      # 9. SettingsScreen（已修正）
       - run: |
           cat > app/src/main/java/com/example/stellae/ui/settings/SettingsScreen.kt << 'EOF'
           package com.example.stellae.ui.settings
@@ -1751,7 +1778,7 @@ jobs:
           }
           EOF
 
-      # 10. MainActivity（改为点击录音，添加取消按钮）
+      # 10. MainActivity（添加语音通话按钮，修复 clickable 错误）
       - run: |
           cat > app/src/main/java/com/example/stellae/MainActivity.kt << 'EOF'
           package com.example.stellae
@@ -1764,6 +1791,7 @@ jobs:
           import androidx.activity.result.contract.ActivityResultContracts
           import androidx.compose.foundation.Image
           import androidx.compose.foundation.background
+          import androidx.compose.foundation.clickable
           import androidx.compose.foundation.layout.*
           import androidx.compose.foundation.lazy.LazyColumn
           import androidx.compose.foundation.lazy.items
@@ -1804,6 +1832,7 @@ jobs:
               val messages by viewModel.messages.collectAsState()
               val isRecording by viewModel.isRecording.collectAsState()
               val isProcessing by viewModel.isProcessing.collectAsState()
+              val isInVoiceCall by viewModel.isInVoiceCall.collectAsState()
               val currentEmotion by viewModel.currentEmotion.collectAsState()
               val relationshipStage by viewModel.relationshipStage.collectAsState()
               val companionName by viewModel.companionName.collectAsState()
@@ -1858,6 +1887,14 @@ jobs:
                                   }
                               },
                               actions = {
+                                  // 语音通话按钮
+                                  IconButton(onClick = { viewModel.toggleVoiceCall() }) {
+                                      Icon(
+                                          if (isInVoiceCall) Icons.Default.CallEnd else Icons.Default.Call,
+                                          null,
+                                          tint = if (isInVoiceCall) Color.Red else Color(0xFF4CAF50)
+                                      )
+                                  }
                                   IconButton(onClick = { showSettings = true }) {
                                       Icon(Icons.Default.Settings, null)
                                   }
@@ -1920,20 +1957,15 @@ jobs:
                                       })
                                   )
 
-                                  // 录音 / 取消按钮
                                   Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                       if (isRecording) {
-                                          // 显示“X”取消按钮
                                           IconButton(
-                                              onClick = {
-                                                  viewModel.cancelRecording()
-                                              },
+                                              onClick = { viewModel.cancelRecording() },
                                               modifier = Modifier.size(48.dp)
                                           ) {
                                               Icon(Icons.Default.Close, null, tint = Color.Red)
                                           }
                                       }
-                                      // 麦克风按钮（点击切换录音）
                                       Box(
                                           modifier = Modifier
                                               .size(48.dp)
@@ -1947,11 +1979,9 @@ jobs:
                                               )
                                               .clickable {
                                                   if (inputText.isNotBlank()) {
-                                                      // 有文字时直接发送
                                                       viewModel.sendMessage(inputText)
                                                       inputText = ""
                                                   } else {
-                                                      // 否则切换录音
                                                       if (recordAudioPermissionState.status.isGranted) {
                                                           viewModel.toggleRecording()
                                                       } else {
@@ -2019,6 +2049,37 @@ jobs:
                           }
                       }
                   }
+              }
+          }
+          EOF
+
+      # 11. VoiceInteractionService（新增实时语音服务骨架）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/VoiceInteractionService.kt << 'EOF'
+          package com.example.stellae
+
+          import android.app.Service
+          import android.content.Intent
+          import android.os.IBinder
+
+          /**
+           * 实时语音对话服务
+           * TODO: 参考以下开源项目实现 WebSocket 实时音频流
+           * - https://github.com/DayanJ/xiaozhi-android-native (Kotlin + WebSocket + Opus)
+           * - https://github.com/qingfeng19491001/VoiceRobot (Volc Dialog SDK)
+           * - https://github.com/volcengine/ai-app-lab (RTC + ASR + LLM + TTS)
+           */
+          class VoiceInteractionService : Service() {
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  // TODO: 建立 WebSocket 连接，开始实时音频双向流
+                  return START_STICKY
+              }
+
+              override fun onDestroy() {
+                  // TODO: 关闭连接，释放资源
+                  super.onDestroy()
               }
           }
           EOF
