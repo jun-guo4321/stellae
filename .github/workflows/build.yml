@@ -21,11 +21,9 @@ jobs:
           mkdir -p app/src/main/java/com/example/stellae/ui/theme
           mkdir -p app/src/main/res/values
           mkdir -p gradle/wrapper
-      - run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.2-bin.zip -O gradle-8.2-bin.zip
-          unzip -q gradle-8.2-bin.zip
-          export PATH=$PWD/gradle-8.2/bin:$PATH
-          gradle --version
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.2
       - run: |
           cat > app/build.gradle.kts << 'EOF'
           plugins {
@@ -1249,9 +1247,7 @@ jobs:
               }
           }
           EOF
-      - run: |
-          export PATH=$PWD/gradle-8.2/bin:$PATH
-          gradle assembleDebug
+      - run: gradle assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
