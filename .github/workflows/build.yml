@@ -58,6 +58,7 @@ jobs:
           dependencies {
               implementation("androidx.core:core-ktx:1.12.0")
               implementation("androidx.appcompat:appcompat:1.6.1")
+              implementation("com.google.accompanist:accompanist-permissions:0.32.0")
               implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
               implementation("androidx.activity:activity-compose:1.8.2")
               implementation(platform("androidx.compose:compose-bom:2024.02.00"))
@@ -663,7 +664,12 @@ jobs:
               init {
                   textToSpeech = TextToSpeech(context) { status ->
                       if (status == TextToSpeech.SUCCESS) {
-                          textToSpeech?.apply { language = Locale.CHINESE; setPitch(1.1f); setSpeechRate(0.95f); isTtsReady = true }
+                          textToSpeech?.apply {
+                              language = Locale.CHINESE
+                              setPitch(1.15f)      // 音调稍高，更温柔
+                              setSpeechRate(0.92f) // 语速稍慢，更自然
+                              isTtsReady = true
+                          }
                       }
                   }
               }
@@ -702,10 +708,18 @@ jobs:
               }
               fun speak(text: String) {
                   if (!isTtsReady) return
-                  val cleanText = text.replace(Regex("[🧠🌤️⏰💝🛡️💭✓○●😴🔄💔]"), "").replace(Regex("任务分配:.+"), "").replace(Regex("记忆触发:.+"), "").trim()
+                  // 过滤所有emoji和特殊符号
+                  val cleanText = text
+                      .replace(Regex("[\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\uFE00-\uFE0F]"), "") // 过滤emoji
+                      .replace(Regex("[🧠🌤️⏰💝🛡️💭✓○●😴🔄💔😂🤣😊😉😍🥰😘😗😙😚😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😏😒🙄😬🤥😌😔😪🤤😴😷🤒🤕🤢🤮🤧🥵🥶🥴😵🤯🤠🥳😎🤓🧐😕😟🙁☹️😮😯😲😳🥺😦😧😨😰😥😢😭😱😖😣😞😓😩😫🥱😤😡😠🤬😈👿💀☠️💩🤡👹👺👻👽👾🤖😺😸😹😻😼😽🙀😿😾❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝]"), "")
+                      .replace(Regex("任务分配:.+"), "")
+                      .replace(Regex("记忆触发:.+"), "")
+                      .trim()
                   if (cleanText.isNotEmpty()) {
                       if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-                          textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, "utteranceId")
+                          // 优化音色：更自然的音调和语速
+                          val utteranceId = "utterance_" + System.currentTimeMillis()
+                          textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
                       } else {
                           @Suppress("DEPRECATION")
                           textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null)
@@ -1004,44 +1018,51 @@ jobs:
               }
               private suspend fun processWithXiyuAI(userInput: String) {
                   _isProcessing.value = true
-                  _showOrchestration.value = true
-                  updateStep(0, "开环检测 → 提取待跟进事项", StepStatus.ACTIVE)
+
+                  // 后台并行执行所有步骤，不显示任务编排
                   val newLoops = openLoopManager.extractOpenLoops(userInput)
-                  updateStep(0, if (newLoops.isNotEmpty()) "开环检测 → 发现 ${newLoops.size} 个待跟进" else "开环检测 → 无新事项", StepStatus.DONE)
-                  delay(200)
-                  updateStep(1, "情绪引擎 → 事件评价", StepStatus.ACTIVE)
                   val event = emotionEngine.inferEventFromText(userInput)
                   event?.let { emotionEngine.processEvent(it) }
                   val emotionLabel = emotionEngine.getEmotionLabel()
                   _currentEmotion.value = emotionLabel
-                  updateStep(1, "情绪引擎 → $emotionLabel", StepStatus.DONE)
-                  delay(200)
-                  updateStep(2, "记忆检索 → 遗忘曲线排序", StepStatus.ACTIVE)
+
                   val allMemories = memoryManager.retrieveAllMemories()
                   val rankedMemories = memoryDecayEngine.rankMemories(allMemories)
                   val recallableMemories = rankedMemories.filter { it.freshness >= 0.15 }.take(3)
-                  updateStep(2, "记忆检索 → ${recallableMemories.size} 条鲜活记忆", StepStatus.DONE)
-                  delay(200)
-                  updateStep(3, "任务分配 → 智能路由", StepStatus.ACTIVE)
+
                   val taskType = aiRepository.routeTask(userInput)
                   if (event?.type == EventType.USER_APOLOGY) {
-                      val apologyResult = relationshipArc.onApology(userInput)
-                      updateStep(3, "任务分配 → 冲突弧: $apologyResult", StepStatus.DONE)
-                  } else {
-                      updateStep(3, "任务分配 → ${taskType.description}", StepStatus.DONE)
+                      relationshipArc.onApology(userInput)
                   }
-                  delay(200)
-                  updateStep(4, "LLM 生成 → 注入情感上下文", StepStatus.ACTIVE)
-                  val response = aiRepository.generateResponseWithEmotion(userInput, emotionLabel, emotionEngine, recallableMemories.map { MemoryEntry(it.memory.content, it.memory.category, it.memory.timestamp) }, emotionEngine.getRelationshipStage(), _messages.value, companionLife)
-                  updateStep(4, "LLM 生成 → 完成", StepStatus.DONE)
-                  delay(200)
-                  updateStep(5, "语音合成 → 输出", StepStatus.ACTIVE)
-                  speechManager.speak(response.content)
-                  updateStep(5, "语音合成 → 完成", StepStatus.DONE)
-                  delay(200)
+
+                  // 直接调用LLM生成回复（最耗时的步骤）
+                  val response = aiRepository.generateResponseWithEmotion(
+                      userInput, emotionLabel, emotionEngine,
+                      recallableMemories.map { MemoryEntry(it.memory.content, it.memory.category, it.memory.timestamp) },
+                      emotionEngine.getRelationshipStage(), _messages.value, companionLife
+                  )
+
+                  // 显示回复
                   _messages.value = _messages.value + response
-                  _showOrchestration.value = false
                   _isProcessing.value = false
+
+                  // 后台语音合成（不阻塞UI）
+                  speechManager.speak(response.content)
+
+                  // 后台保存记忆
+                  memoryManager.saveInteraction(userInput, response.content, emotionLabel)
+                  companionLife.updateEnergy(1)
+                  recallableMemories.forEach { memoryManager.updateMemory(memoryDecayEngine.refreshMemoryOnRecall(it.memory)) }
+
+                  _relationshipStage.value = when (emotionEngine.getRelationshipStage()) {
+                      RelationshipStage.STRANGER -> "陌生"
+                      RelationshipStage.NORMAL -> "普通"
+                      RelationshipStage.FAMILIAR -> "熟悉"
+                      RelationshipStage.CLOSE -> "亲密"
+                      RelationshipStage.CONFLICT -> "冲突中"
+                      RelationshipStage.RECONCILING -> "和好中"
+                  }
+                  _companionStatus.value = companionLife.getCurrentState().description
                   _relationshipStage.value = when (emotionEngine.getRelationshipStage()) {
                       RelationshipStage.STRANGER -> "陌生"
                       RelationshipStage.NORMAL -> "普通"
@@ -1119,8 +1140,10 @@ jobs:
           }
           EOF
       - run: |
+                - run: |
           cat > app/src/main/java/com/example/stellae/MainActivity.kt << 'EOF'
           package com.example.stellae
+          import android.Manifest
           import android.os.Bundle
           import androidx.activity.ComponentActivity
           import androidx.activity.compose.setContent
@@ -1131,7 +1154,6 @@ jobs:
           import androidx.compose.foundation.lazy.rememberLazyListState
           import androidx.compose.foundation.shape.CircleShape
           import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.animation.AnimatedVisibility
           import androidx.compose.material.icons.Icons
           import androidx.compose.material.icons.filled.Send
           import androidx.compose.material.icons.filled.Mic
@@ -1141,13 +1163,13 @@ jobs:
           import androidx.compose.ui.Modifier
           import androidx.compose.ui.draw.clip
           import androidx.compose.ui.graphics.Color
-          import androidx.compose.foundation.text.KeyboardOptions
-          import androidx.compose.foundation.text.KeyboardActions
           import androidx.compose.ui.text.input.ImeAction
           import androidx.compose.ui.text.style.TextAlign
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
           import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.google.accompanist.permissions.ExperimentalPermissionsApi
+          import com.google.accompanist.permissions.rememberPermissionState
           import kotlinx.coroutines.launch
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
@@ -1155,21 +1177,27 @@ jobs:
                   setContent { ChatScreen() }
               }
           }
-          @OptIn(ExperimentalMaterial3Api::class)
+          @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
           @Composable
           fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
               val messages by viewModel.messages.collectAsState()
               val isRecording by viewModel.isRecording.collectAsState()
               val isProcessing by viewModel.isProcessing.collectAsState()
               val currentEmotion by viewModel.currentEmotion.collectAsState()
-              val showOrchestration by viewModel.showOrchestration.collectAsState()
-              val orchestrationSteps by viewModel.orchestrationSteps.collectAsState()
               val relationshipStage by viewModel.relationshipStage.collectAsState()
               val listState = rememberLazyListState()
               var inputText by remember { mutableStateOf("") }
+              val scope = rememberCoroutineScope()
+
+              // 运行时权限申请
+              val recordAudioPermissionState = rememberPermissionState(
+                  Manifest.permission.RECORD_AUDIO
+              )
+
               LaunchedEffect(messages.size) {
                   if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
               }
+
               Scaffold(
                   topBar = {
                       TopAppBar(
@@ -1200,38 +1228,56 @@ jobs:
                   }
               ) { padding ->
                   Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-                      AnimatedVisibility(visible = showOrchestration) {
+                      // 显示思考中状态（简化版）
+                      if (isProcessing) {
                           Surface(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(12.dp), tonalElevation = 4.dp) {
-                              Column(modifier = Modifier.padding(16.dp)) {
-                                  Text("任务编排中", fontSize = 11.sp, color = Color.Gray)
-                                  Spacer(modifier = Modifier.height(8.dp))
-                                  orchestrationSteps.forEach { step ->
-                                      val (indicator, color) = when (step.status) {
-                                          StepStatus.DONE -> "✓" to Color(0xFF4ADE80)
-                                          StepStatus.ACTIVE -> "●" to Color(0xFF6750A4)
-                                          StepStatus.PENDING -> "○" to Color.LightGray
-                                      }
-                                      Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-                                          Text(indicator, color = color, fontSize = 12.sp, modifier = Modifier.width(20.dp), textAlign = TextAlign.Center)
-                                          Text(step.description, fontSize = 12.sp, color = if (step.status == StepStatus.PENDING) Color.Gray else Color.Black)
-                                      }
-                                  }
+                              Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                  CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                  Spacer(modifier = Modifier.width(8.dp))
+                                  Text("星黎正在思考...", fontSize = 12.sp, color = Color.Gray)
                               }
                           }
                       }
+
                       LazyColumn(state = listState, modifier = Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
                           items(messages) { msg -> ChatBubble(msg) }
                       }
+
                       Surface(tonalElevation = 2.dp) {
                           Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                              Button(onClick = { if (isRecording) viewModel.stopRecording() else viewModel.startRecording() }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(24.dp), colors = ButtonDefaults.buttonColors(containerColor = if (isRecording) Color(0xFFEF5350) else Color(0xFF1C1C1E))) {
+                              Button(
+                                  onClick = {
+                                      when {
+                                          isRecording -> viewModel.stopRecording()
+                                          recordAudioPermissionState.hasPermission -> viewModel.startRecording()
+                                          else -> recordAudioPermissionState.launchPermissionRequest()
+                                      }
+                                  },
+                                  modifier = Modifier.fillMaxWidth().height(48.dp),
+                                  shape = RoundedCornerShape(24.dp),
+                                  colors = ButtonDefaults.buttonColors(containerColor = if (isRecording) Color(0xFFEF5350) else Color(0xFF1C1C1E))
+                              ) {
                                   Icon(Icons.Default.Mic, null, modifier = Modifier.size(20.dp))
                                   Spacer(modifier = Modifier.width(8.dp))
                                   Text(if (isRecording) "松开结束" else "按住说话")
                               }
                               Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                  OutlinedTextField(value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f), placeholder = { Text("输入消息...") }, shape = RoundedCornerShape(24.dp), singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { if (inputText.isNotBlank()) { viewModel.sendMessage(inputText); inputText = "" } }))
-                                  IconButton(onClick = { if (inputText.isNotBlank()) { viewModel.sendMessage(inputText); inputText = "" } }, modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFF1C1C1E))) {
+                                  OutlinedTextField(
+                                      value = inputText,
+                                      onValueChange = { inputText = it },
+                                      modifier = Modifier.weight(1f),
+                                      placeholder = { Text("输入消息...") },
+                                      shape = RoundedCornerShape(24.dp),
+                                      singleLine = true,
+                                      keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                      keyboardActions = KeyboardActions(onSend = {
+                                          if (inputText.isNotBlank()) { viewModel.sendMessage(inputText); inputText = "" }
+                                      })
+                                  )
+                                  IconButton(
+                                      onClick = { if (inputText.isNotBlank()) { viewModel.sendMessage(inputText); inputText = "" } },
+                                      modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFF1C1C1E))
+                                  ) {
                                       Icon(Icons.Default.Send, null, tint = Color.White)
                                   }
                               }
