@@ -1140,7 +1140,6 @@ jobs:
           }
           EOF
       - run: |
-                - run: |
           cat > app/src/main/java/com/example/stellae/MainActivity.kt << 'EOF'
           package com.example.stellae
           import android.Manifest
