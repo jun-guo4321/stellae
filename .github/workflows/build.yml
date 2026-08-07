@@ -28,6 +28,11 @@ jobs:
           cat > gradle.properties << 'EOF'
           android.useAndroidX=true
           android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
+          org.gradle.daemon=false
+          org.gradle.parallel=true
+          org.gradle.configureondemand=true
+          org.gradle.caching=true
           EOF
       - run: |
           cat > app/build.gradle.kts << 'EOF'
