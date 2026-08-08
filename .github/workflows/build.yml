@@ -51,8 +51,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 6
-                  versionName = "1.5"
+                  versionCode = 7
+                  versionName = "1.6"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -765,6 +765,8 @@ jobs:
               private var mediaPlayer: MediaPlayer? = null
               private var onResultCallback: ((String) -> Unit)? = null
               private var isTtsReady = false
+              var enabled = true                 // 语音播报开关（设置里可关闭）
+              var speechRate = 10                // 语速（edge-tts rate 百分比）
               private val client = okhttp3.OkHttpClient.Builder()
                   .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                   .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
@@ -783,7 +785,7 @@ jobs:
                   }
               }
 
-              fun startListening(onResult: (String) -> Unit) {
+              fun startListening(onResult: (String) -> Unit, onError: ((String) -> Unit)? = null) {
                   onResultCallback = onResult
                   if (SpeechRecognizer.isRecognitionAvailable(context)) {
                       speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
@@ -793,7 +795,19 @@ jobs:
                               override fun onRmsChanged(rmsdB: Float) {}
                               override fun onBufferReceived(buffer: ByteArray?) {}
                               override fun onEndOfSpeech() {}
-                              override fun onError(error: Int) { onResultCallback?.invoke(""); Log.e("Speech", "Error: $error") }
+                              override fun onError(error: Int) {
+                                  val msg = when (error) {
+                                      SpeechRecognizer.ERROR_NO_MATCH -> "没有听清，请再说一遍"
+                                      SpeechRecognizer.ERROR_NETWORK -> "语音识别需要网络，请检查网络后重试"
+                                      SpeechRecognizer.ERROR_SERVER -> "语音识别服务暂时不可用，请稍后再试"
+                                      SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "缺少录音权限"
+                                      SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "说话时间太短，请再试一次"
+                                      else -> "语音识别失败（错误码 $error），可能是设备没有语音识别服务"
+                                  }
+                                  Log.e("Speech", "Error: $error")
+                                  onError?.invoke(msg)
+                                  onResultCallback?.invoke("")
+                              }
                               override fun onResults(results: Bundle?) {
                                   onResultCallback?.invoke(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: "")
                               }
@@ -808,17 +822,17 @@ jobs:
                       }
                       speechRecognizer?.startListening(intent)
                   } else {
+                      onError?.invoke("当前设备不支持系统语音识别")
                       onResultCallback?.invoke("")
                   }
               }
-
               fun stopListening() {
                   speechRecognizer?.stopListening()
                   speechRecognizer?.destroy()
                   speechRecognizer = null
               }
 
-              suspend fun speak(text: String, companionName: String = "\u661f\u9ece", voice: String = "zh-CN-XiaoxiaoNeural") {
+              suspend fun speak(text: String, companionName: String = "星黎", voice: String = "zh-CN-XiaoxiaoNeural", rate: Int = 10) {
                   // 加强过滤：移除 Emoji 和所有非文字符号
                   val cleanText = text
                       .replace(Regex("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF]+"), "") // 移除 Emoji
@@ -827,24 +841,29 @@ jobs:
                       .replace(Regex("\u8bb0\u5fc6\u89e6\u53d1:.+"), "")
                       .trim()
 
+                  if (!enabled) return
                   if (cleanText.isEmpty()) return
 
-                  val success = tryEdgeTts(cleanText, voice)
+                  val success = tryEdgeTts(cleanText, voice, speechRate)
                   if (!success && isTtsReady) {
-                      textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, null)
+                      textToSpeech?.apply {
+                          setSpeechRate(rate / 100f * 0.92f)
+                          speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, null)
+                      }
                   }
               }
 
-              suspend fun previewVoice(voice: String, onComplete: (() -> Unit)? = null) {
+              suspend fun previewVoice(voice: String, rate: Int = 10, onComplete: (() -> Unit)? = null) {
                   val text = "\u8fd9\u662f\u4e00\u6bb5\u8bd5\u542c\u8bed\u97f3\uff0c\u4f60\u89c9\u5f97\u8fd9\u4e2a\u97f3\u8272\u600e\u4e48\u6837\uff1f"
-                  tryEdgeTts(text, voice, onComplete)
+                  tryEdgeTts(text, voice, speechRate, onComplete)
               }
 
-              private suspend fun tryEdgeTts(text: String, voice: String, onComplete: (() -> Unit)? = null): Boolean {
+              private suspend fun tryEdgeTts(text: String, voice: String, rate: Int = 10, onComplete: (() -> Unit)? = null): Boolean {
                   return withContext(Dispatchers.IO) {
                       try {
                           val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
-                          val url = "https://tts.kina.ink/tts?text=$encodedText&voice=$voice&rate=%2B10%"
+                          val rateParam = if (rate >= 0) "%2B$rate%" else "$rate%"
+                          val url = "https://tts.kina.ink/tts?text=$encodedText&voice=$voice&rate=$rateParam"
                           val request = Request.Builder().url(url).build()
                           val response = client.newCall(request).execute()
                           if (!response.isSuccessful) return@withContext false
@@ -873,7 +892,6 @@ jobs:
                       }
                   }
               }
-
               fun stopSpeaking() {
                   mediaPlayer?.stop()
                   mediaPlayer?.release()
@@ -1423,6 +1441,8 @@ jobs:
                   startEmotionTicker()
                   startOpenLoopChecker()
                   startProactiveChecker()
+                  speechManager.enabled = getVoiceEnabled()
+                  speechManager.speechRate = getVoiceRate()
               }
 
               // 设置方法
@@ -1446,6 +1466,14 @@ jobs:
               // 语音通话服务地址（在设置里配置，避免写死的占位域名）
               fun getVoiceServerUrl(): String = runBlocking { memoryManager.getSetting("voice_server_url") ?: "" }
               fun setVoiceServerUrl(url: String) { viewModelScope.launch { memoryManager.setSetting("voice_server_url", url) } }
+              
+              // 语音播报开关（设置里可关闭，关闭后不再朗读回复）
+              fun getVoiceEnabled(): Boolean = runBlocking { memoryManager.getSetting("voice_enabled") != "0" }
+              fun setVoiceEnabled(v: Boolean) { viewModelScope.launch { memoryManager.setSetting("voice_enabled", if (v) "1" else "0"); speechManager.enabled = v } }
+              
+              // 语速设置（调音色）
+              fun getVoiceRate(): Int = runBlocking { memoryManager.getSetting("voice_rate")?.toIntOrNull() ?: 10 }
+              fun setVoiceRate(rate: Int) { viewModelScope.launch { memoryManager.setSetting("voice_rate", rate.toString()); speechManager.speechRate = rate } }
               
               // 休息时间设置：几点到几点休息，期间不回复
               fun getRestEnabled(): Boolean = runBlocking { memoryManager.getSetting("rest_enabled") == "1" }
@@ -1501,31 +1529,36 @@ jobs:
                   try {
                       if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION)
                           != PackageManager.PERMISSION_GRANTED) {
+                          _messages.value = _messages.value + ChatMessage("⚠️ 需要定位权限才能获取位置，请到设置里授权", false, "定位")
                           return
                       }
-                      val location = fusedLocationClient.lastLocation.await()
-                      if (location != null) {
-                          currentLocation = reverseGeocode(location)
+                      // 优先主动获取当前位置（lastLocation 经常为 null）
+                      val location = try {
+                          if (android.os.Build.VERSION.SDK_INT >= 30) {
+                              fusedLocationClient.getCurrentLocation(
+                                  com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY,
+                                  null
+                              ).await()
+                          } else {
+                              fusedLocationClient.lastLocation.await()
+                          }
+                      } catch (e: Exception) { null }
+                      val loc = location ?: run {
+                          // 回退：请求一次位置更新
+                          try { fusedLocationClient.lastLocation.await() } catch (e: Exception) { null }
+                      }
+                      if (loc != null) {
+                          currentLocation = reverseGeocode(loc)
                           aiRepository.currentLocation = currentLocation
-                          // 提示用户位置已获取
                           _messages.value = _messages.value + ChatMessage("📍 已获取位置: ${currentLocation?.city ?: "未知"}", false, "定位更新")
                       } else {
-                          // 尝试主动请求位置更新
-                          fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
-                              if (loc != null) {
-                                  viewModelScope.launch {
-                                      currentLocation = reverseGeocode(loc)
-                                      aiRepository.currentLocation = currentLocation
-                                      _messages.value = _messages.value + ChatMessage("📍 已获取位置: ${currentLocation?.city ?: "未知"}", false, "定位更新")
-                                  }
-                              }
-                          }
+                          _messages.value = _messages.value + ChatMessage("⚠️ 获取位置失败，请检查 GPS 是否开启或稍后再试", false, "定位")
                       }
                   } catch (e: Exception) {
                       e.printStackTrace()
+                      _messages.value = _messages.value + ChatMessage("⚠️ 定位出错: ${e.message}", false, "定位")
                   }
               }
-
               private suspend fun reverseGeocode(location: Location): LocationInfo? {
                   return withContext(Dispatchers.IO) {
                       try {
@@ -1651,14 +1684,21 @@ jobs:
 
               private fun startRecording() {
                   _isRecording.value = true
-                  speechManager.startListening { recognizedText ->
-                      viewModelScope.launch {
-                          _isRecording.value = false
-                          if (recognizedText.isNotBlank()) sendMessage(recognizedText)
+                  speechManager.startListening(
+                      { recognizedText ->
+                          viewModelScope.launch {
+                              _isRecording.value = false
+                              if (recognizedText.isNotBlank()) sendMessage(recognizedText)
+                          }
+                      },
+                      { errorMsg ->
+                          viewModelScope.launch {
+                              _isRecording.value = false
+                              _messages.value = _messages.value + ChatMessage("🎤 $errorMsg", false, "语音识别")
+                          }
                       }
-                  }
+                  )
               }
-
               private fun stopRecording() {
                   _isRecording.value = false
                   speechManager.stopListening()
@@ -1804,6 +1844,8 @@ jobs:
               var restEnabled by remember { mutableStateOf(viewModel.getRestEnabled()) }
               var restStart by remember { mutableStateOf(viewModel.getRestStart()) }
               var restEnd by remember { mutableStateOf(viewModel.getRestEnd()) }
+              var voiceEnabled by remember { mutableStateOf(viewModel.getVoiceEnabled()) }
+              var voiceRate by remember { mutableStateOf(viewModel.getVoiceRate()) }
 
               Scaffold(
                   topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }) }
@@ -1941,17 +1983,63 @@ jobs:
                           }
                       }}
 
-                      // 7. 语音通话服务地址
+                      // 7. 语音通话服务地址（预设选项）
                       Card { Column(modifier = Modifier.padding(16.dp)) {
-                          Text("语音通话服务地址", style = MaterialTheme.typography.titleMedium)
+                          Text("语音通话", style = MaterialTheme.typography.titleMedium)
                           Spacer(modifier = Modifier.height(4.dp))
-                          Text("填写 wss:// 语音服务地址（可部署开源项目小智 xiaozhi-server），留空则语音通话会提示未配置", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+                          Text("选择一种语音模式。本地对话不需要服务器；实时语音需要配置小智服务器。", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
                           Spacer(modifier = Modifier.height(8.dp))
-                          OutlinedTextField(value = voiceServerUrl, onValueChange = { voiceServerUrl = it }, label = { Text("wss://你的服务器/ws") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                          Spacer(modifier = Modifier.height(8.dp))
-                          Button(onClick = { viewModel.setVoiceServerUrl(voiceServerUrl.trim()) }) {
-                              Text("保存服务地址")
+                          val serverOptions = listOf(
+                              "本地语音对话（无需服务器）" to "",
+                              "小智服务器（实时语音）" to "wss://你的服务器:8000/ws",
+                          )
+                          var expanded by remember { mutableStateOf(false) }
+                          ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+                              TextField(
+                                  value = if (voiceServerUrl.isBlank()) serverOptions[0].first else serverOptions[1].first,
+                                  onValueChange = {},
+                                  readOnly = true,
+                                  trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                                  modifier = Modifier.fillMaxWidth().menuAnchor()
+                              )
+                              ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                                  serverOptions.forEach { (label, url) ->
+                                      DropdownMenuItem(
+                                          text = { Text(label) },
+                                          onClick = {
+                                              voiceServerUrl = url
+                                              viewModel.setVoiceServerUrl(url)
+                                              expanded = false
+                                          }
+                                      )
+                                  }
+                              }
                           }
+                          if (voiceServerUrl.isNotBlank()) {
+                              Spacer(modifier = Modifier.height(8.dp))
+                              OutlinedTextField(value = voiceServerUrl, onValueChange = { voiceServerUrl = it; viewModel.setVoiceServerUrl(it) }, label = { Text("小智服务器地址") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                          }
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Text("提示：实时语音需要自己部署开源项目 xiaozhi-server（github.com/78/xiaozhi-server），部署好后把地址填到这里。", fontSize = 11.sp, color = androidx.compose.ui.graphics.Color.Gray)
+                      }}
+
+                      // 8. 语音播报与语速
+                      Card { Column(modifier = Modifier.padding(16.dp)) {
+                          Text("语音播报", style = MaterialTheme.typography.titleMedium)
+                          Spacer(modifier = Modifier.height(4.dp))
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                              Text("朗读 AI 回复", modifier = Modifier.weight(1f))
+                              Switch(checked = voiceEnabled, onCheckedChange = { voiceEnabled = it; viewModel.setVoiceEnabled(it) })
+                          }
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Text("语速调节（调音色）", style = MaterialTheme.typography.bodyMedium)
+                          Slider(
+                              value = voiceRate.toFloat(),
+                              onValueChange = { voiceRate = it.toInt() },
+                              onValueChangeFinished = { viewModel.setVoiceRate(voiceRate) },
+                              valueRange = 0f..30f,
+                          )
+                          Text("当前语速: ${voiceRate}% (默认 10%)", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
                       }}
                   }
               }
@@ -2207,14 +2295,22 @@ jobs:
                                       }
                                   }
 
-                                  // + 号展开面板：图片 / 位置 / 视频
+                                  // + 号展开面板：相册 / 拍照 / 位置 / 视频
                                   if (showMorePanel) {
                                       Row(
                                           modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                                           horizontalArrangement = Arrangement.spacedBy(20.dp)
                                       ) {
-                                          MoreActionItem(Icons.Default.Image, "图片") {
+                                          MoreActionItem(Icons.Default.PhotoLibrary, "相册") {
                                               galleryLauncher.launch("image/*")
+                                              showMorePanel = false
+                                          }
+                                          MoreActionItem(Icons.Default.PhotoCamera, "拍照") {
+                                              if (cameraPermissionState.status.isGranted) {
+                                                  cameraLauncher.launch(null)
+                                              } else {
+                                                  cameraPermissionState.launchPermissionRequest()
+                                              }
                                               showMorePanel = false
                                           }
                                           MoreActionItem(Icons.Default.Place, "位置") {
