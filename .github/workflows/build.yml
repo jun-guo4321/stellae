@@ -52,12 +52,20 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 15
-                  versionName = "2.4"
+                  versionCode = 17
+                  versionName = "2.6"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
               kotlinOptions { jvmTarget = "1.8" }
+              // Vosk 模型必须不压缩，否则 Model() 加载失败
+              androidResources {
+                  noCompress += "vosk"
+                  noCompress += "mdl"
+                  noCompress += "fst"
+                  noCompress += "conf"
+                  noCompress += "ie"
+              }
           }
           dependencies {
               // 原有依赖
@@ -180,13 +188,18 @@ jobs:
           EOF
 
       # 下载 Vosk 中文离线语音识别模型（约 42MB，打进 APK，装上即可离线识别）
+      # 用 set -e 确保下载/解压失败立即中止，避免空模型打进 APK 导致运行时 "Failed to create a model"
       - run: |
+          set -e
           echo "下载 Vosk 中文模型..."
-          curl -sL -o /tmp/vosk-model-small-cn.zip "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
+          curl -sL --retry 3 -o /tmp/vosk-model-small-cn.zip "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
           ls -la /tmp/vosk-model-small-cn.zip
           cd app/src/main/assets/vosk
           unzip -o -q /tmp/vosk-model-small-cn.zip
           mv vosk-model-small-cn-0.22 model-small-cn
+          # 校验模型关键文件存在，缺失则构建失败（避免运行时加载空模型报错）
+          test -f model-small-cn/am/final.mdl || { echo "!!! Vosk 模型不完整（缺 am/final.mdl）"; ls -la model-small-cn; exit 1; }
+          test -f model-small-cn/conf/mfcc.conf || { echo "!!! Vosk 模型不完整（缺 conf/mfcc.conf）"; exit 1; }
           ls -la model-small-cn | head -10
 
       # ========== 所有源码文件（包含集成骨架） ==========
@@ -937,7 +950,8 @@ jobs:
                       true
                   } catch (e: Exception) {
                       voskActive = false
-                      onError?.invoke("离线语音识别初始化失败: ${e.message}")
+                      val hint = if (e.message?.contains("model", true) == true) "（离线模型未找到，请确认 APK 内包含 vosk 模型）" else ""
+                      onError?.invoke("离线语音识别初始化失败: ${e.message}$hint")
                       false
                   }
               }
@@ -1504,23 +1518,11 @@ jobs:
 
                   history.forEach { msg ->
                       if (msg.imageBase64 != null) {
-                          val contentList = ArrayList<Map<String, Any>>()
-
-                          val textPart = HashMap<String, Any>()
-                          textPart["type"] = "text"
-                          textPart["text"] = msg.content
-                          contentList.add(textPart)
-
-                          val urlMap = HashMap<String, Any>()
-                          urlMap["url"] = "data:image/jpeg;base64,${msg.imageBase64}"
-                          val imagePart = HashMap<String, Any>()
-                          imagePart["type"] = "image_url"
-                          imagePart["image_url"] = urlMap
-                          contentList.add(imagePart)
-
+                          // 历史消息里的图片不再重复上传（图片 base64 很大，重复传会拖慢每次响应）
+                          // 只保留文字内容，避免请求体积暴涨
                           val msgMap = HashMap<String, Any>()
                           msgMap["role"] = if (msg.isUser) "user" else "assistant"
-                          msgMap["content"] = contentList
+                          msgMap["content"] = msg.content
                           messages.add(msgMap)
                       } else {
                           val msgMap = HashMap<String, Any>()
@@ -1866,25 +1868,27 @@ jobs:
 
               // 用单次定位请求主动获取最新位置（等 5 秒）
               // 用单次定位请求主动获取最新位置（同时请求 GPS + 网络，等 10 秒）
+              // 持续监听 15 秒，收集所有定位结果，取精度最高（accuracy 最小）的位置
               private suspend fun requestFreshLocation(): android.location.Location? {
                   return withContext(Dispatchers.IO) {
                       val latch = java.util.concurrent.CountDownLatch(1)
-                      var result: android.location.Location? = null
+                      var best: android.location.Location? = null
                       val listener = object : android.location.LocationListener {
                           override fun onLocationChanged(location: android.location.Location) {
-                              result = location
-                              latch.countDown()
+                              // 保留 accuracy 最小的位置（越准）；无 accuracy 的也先记下
+                              val cur = best
+                              if (cur == null || (location.hasAccuracy() && (!cur.hasAccuracy() || location.accuracy < cur.accuracy))) {
+                                  best = location
+                              }
                           }
                           override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
                           override fun onProviderEnabled(provider: String) {}
-                          override fun onProviderDisabled(provider: String) {
-                              // 一个 provider 关了不代表另一个也关，不急着解锁
-                          }
+                          override fun onProviderDisabled(provider: String) {}
                       }
                       try {
                           val fine = (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION)
                               == PackageManager.PERMISSION_GRANTED)
-                          // 同时向 GPS 和网络定位请求，哪个先返回用哪个
+                          // 同时监听 GPS 和网络定位，持续 15 秒取最优
                           val providers = mutableListOf<String>()
                           if (fine) providers.add(android.location.LocationManager.GPS_PROVIDER)
                           providers.add(android.location.LocationManager.NETWORK_PROVIDER)
@@ -1892,18 +1896,23 @@ jobs:
                           for (p in providers) {
                               try {
                                   if (locationManager.isProviderEnabled(p)) {
-                                      locationManager.requestSingleUpdate(p, listener, android.os.Looper.getMainLooper())
+                                      locationManager.requestLocationUpdates(p, 0L, 0f, listener, android.os.Looper.getMainLooper())
                                       registered = true
                                   }
                               } catch (e: Exception) {}
                           }
-                          if (registered) latch.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                          if (registered) {
+                              latch.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                              // 先释放锁（超时或已被 countDown）
+                          } else {
+                              latch.countDown()
+                          }
                       } catch (e: Exception) {
                           e.printStackTrace()
                       } finally {
                           try { locationManager.removeUpdates(listener) } catch (e: Exception) {}
                       }
-                      result
+                      best
                   }
               }
               private suspend fun reverseGeocode(location: Location): LocationInfo? {
