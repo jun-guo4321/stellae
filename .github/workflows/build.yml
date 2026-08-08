@@ -51,8 +51,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 9
-                  versionName = "1.8"
+                  versionCode = 10
+                  versionName = "1.9"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -2063,10 +2063,13 @@ jobs:
           import androidx.compose.material.icons.Icons
           import androidx.compose.material.icons.filled.ArrowBack
           import androidx.compose.material.icons.filled.PlayArrow
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.result.contract.ActivityResultContracts
           import androidx.compose.material3.*
           import androidx.compose.runtime.*
           import androidx.compose.ui.Alignment
           import androidx.compose.ui.Modifier
+          import androidx.compose.ui.platform.LocalContext
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
           import androidx.lifecycle.viewmodel.compose.viewModel
@@ -2100,7 +2103,9 @@ jobs:
               var baseUrl by remember { mutableStateOf(viewModel.getBaseUrl()) }
               var modelId by remember { mutableStateOf(viewModel.getModelId()) }
               val context = LocalContext.current
-              val avatarPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+              val avatarPickerLauncher = rememberLauncherForActivityResult(
+                  contract = ActivityResultContracts.GetContent()
+              ) { uri: android.net.Uri? ->
                   if (uri != null) {
                       try {
                           val bmp = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) }
