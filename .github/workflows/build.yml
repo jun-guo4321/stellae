@@ -22,6 +22,7 @@ jobs:
           mkdir -p app/src/main/java/com/example/stellae/ui/settings
           mkdir -p app/src/main/java/com/example/stellae/integrations
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/xml
           mkdir -p gradle/wrapper
       - uses: gradle/actions/setup-gradle@v3
         with:
@@ -58,6 +59,7 @@ jobs:
               kotlinOptions { jvmTarget = "1.8" }
           }
           dependencies {
+              // 原有依赖
               implementation("androidx.core:core-ktx:1.12.0")
               implementation("androidx.appcompat:appcompat:1.6.1")
               implementation("com.google.accompanist:accompanist-permissions:0.32.0")
@@ -81,9 +83,24 @@ jobs:
               implementation("androidx.camera:camera-camera2:1.3.1")
               implementation("androidx.camera:camera-lifecycle:1.3.1")
               implementation("androidx.camera:camera-view:1.3.1")
+              implementation("androidx.camera:camera-video:1.3.1")
+
+              // 定位
               implementation("com.google.android.gms:play-services-location:21.0.1")
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
-              implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+              // 新增开源项目集成依赖
+              // 1. WebSocket 实时语音 (xiaozhi-android-native)
+              implementation("com.squareup.okhttp3:okhttp:4.12.0") // 已存在
+              // 2. Volc Dialog SDK (VoiceRobot) - 需要从官方获取 aar，这里留空
+              // 3. 向量数据库 (Sora-mem) - 使用 SQLite + 向量扩展，可后续添加
+              // 4. 离线 TTS (VoxSherpa) - 使用其 Android SDK，可后续添加
+              // 5. 地图 (osmdroid)
+              implementation("org.osmdroid:osmdroid-android:6.1.17")
+              implementation("org.osmdroid:osmdroid-wms:6.1.17")
+              // 6. 悬浮窗 (AI-Live-Overflow) - 需要系统权限，代码骨架已包含
+              // 7. 其他通用
+              implementation("com.github.kittinunf.fuel:fuel:2.3.1") // 用于 HTTP 请求
           }
           EOF
       - run: |
@@ -115,6 +132,8 @@ jobs:
               <uses-permission android:name="android.permission.CAMERA" />
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" /> <!-- 悬浮窗 -->
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
               <uses-feature android:name="android.hardware.camera" android:required="false" />
               <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
               <application android:label="Stellae" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
@@ -122,6 +141,16 @@ jobs:
                       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
                   </activity>
                   <service android:name=".VoiceInteractionService" android:enabled="true" android:exported="false" />
+                  <service android:name=".integrations.FloatingCompanionService" android:enabled="true" android:exported="false" />
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
               </application>
           </manifest>
           EOF
@@ -129,40 +158,1195 @@ jobs:
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <resources><string name="app_name">\u661f\u9ece</string></resources>
           EOF
+      - run: |
+          cat > app/src/main/res/xml/file_paths.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <cache-path name="cache" path="." />
+              <external-path name="external" path="." />
+          </paths>
+          EOF
 
-      # ========== 以下为所有源码文件 ==========
+      # ========== 所有源码文件（包含集成骨架） ==========
 
-      # 1. ChatMessage.kt（新增消息类型支持）
+      # 1. ChatMessage.kt
       - run: |
           cat > app/src/main/java/com/example/stellae/ChatMessage.kt << 'EOF'
           package com.example.stellae
-
           data class ChatMessage(
               val content: String,
               val isUser: Boolean,
               val taskLabel: String? = null,
               val memoryHint: String? = null,
               val imageBase64: String? = null,
-              val location: LocationAttachment? = null,
               val videoPath: String? = null,
               val timestamp: Long = System.currentTimeMillis()
           )
-
-          data class LocationAttachment(
-              val latitude: Double,
-              val longitude: Double,
-              val address: String = ""
-          )
-
           data class OrchestrationStep(val description: String, val status: StepStatus)
           enum class StepStatus { DONE, ACTIVE, PENDING }
           EOF
 
-      # 2. 其余核心文件（保持原有功能，以下为精简版本，完整版请参考之前提供的文件）
-      # 由于篇幅限制，此处省略 EmotionEngine、MemoryDecayEngine、OpenLoopManager 等核心文件
-      # 它们与之前版本保持一致，在此不再重复列出
+      # 2. data 包 (MemoryEntity, AppDatabase)
+      - run: |
+          cat > app/src/main/java/com/example/stellae/data/MemoryEntity.kt << 'EOF'
+          package com.example.stellae.data
+          import androidx.room.Entity
+          import androidx.room.PrimaryKey
+          import androidx.room.Dao
+          import androidx.room.Insert
+          import androidx.room.Query
+          import androidx.room.Update
+          import androidx.room.Delete
 
-      # ===== 新增：ChatViewModel（修复健康提醒 + 休息时间设置） =====
+          @Entity(tableName = "memories")
+          data class MemoryEntity(
+              @PrimaryKey(autoGenerate = true) val id: Long = 0,
+              val content: String,
+              val category: String,
+              val timestamp: Long = System.currentTimeMillis(),
+              val importance: Int = 1
+          )
+
+          @Entity(tableName = "settings")
+          data class SettingsEntity(
+              @PrimaryKey val key: String,
+              val value: String
+          )
+
+          @Dao
+          interface MemoryDao {
+              @Insert suspend fun insert(memory: MemoryEntity): Long
+              @Query("SELECT * FROM memories ORDER BY timestamp DESC LIMIT 50") suspend fun getAllMemories(): List<MemoryEntity>
+              @Query("SELECT * FROM memories WHERE content LIKE '%' || :keyword || '%' ORDER BY importance DESC, timestamp DESC LIMIT 10") suspend fun searchMemories(keyword: String): List<MemoryEntity>
+              @Query("SELECT * FROM memories WHERE category = :category ORDER BY timestamp DESC LIMIT 20") suspend fun getMemoriesByCategory(category: String): List<MemoryEntity>
+              @Delete suspend fun delete(memory: MemoryEntity)
+              @Query("DELETE FROM memories WHERE timestamp < :cutoffTime") suspend fun deleteOldMemories(cutoffTime: Long)
+          }
+
+          @Dao
+          interface SettingsDao {
+              @Query("SELECT value FROM settings WHERE key = :key LIMIT 1") suspend fun getValue(key: String): String?
+              @Insert suspend fun insert(setting: SettingsEntity)
+              @Update suspend fun update(setting: SettingsEntity)
+              @Query("DELETE FROM settings WHERE key = :key") suspend fun delete(key: String)
+          }
+          EOF
+
+      - run: |
+          cat > app/src/main/java/com/example/stellae/data/AppDatabase.kt << 'EOF'
+          package com.example.stellae.data
+          import android.content.Context
+          import androidx.room.Database
+          import androidx.room.Room
+          import androidx.room.RoomDatabase
+
+          @Database(entities = [MemoryEntity::class, SettingsEntity::class], version = 2, exportSchema = false)
+          abstract class AppDatabase : RoomDatabase() {
+              abstract fun memoryDao(): MemoryDao
+              abstract fun settingsDao(): SettingsDao
+              companion object {
+                  @Volatile private var INSTANCE: AppDatabase? = null
+                  fun getDatabase(context: Context): AppDatabase {
+                      return INSTANCE ?: synchronized(this) {
+                          val instance = Room.databaseBuilder(
+                              context.applicationContext,
+                              AppDatabase::class.java,
+                              "stellae_memory.db"
+                          ).build()
+                          INSTANCE = instance
+                          instance
+                      }
+                  }
+              }
+          }
+          EOF
+
+      # 3. Theme
+      - run: |
+          cat > app/src/main/java/com/example/stellae/ui/theme/StellaeTheme.kt << 'EOF'
+          package com.example.stellae.ui.theme
+          import androidx.compose.foundation.isSystemInDarkTheme
+          import androidx.compose.material3.MaterialTheme
+          import androidx.compose.material3.darkColorScheme
+          import androidx.compose.material3.lightColorScheme
+          import androidx.compose.runtime.Composable
+          import androidx.compose.ui.graphics.Color
+          private val LightColors = lightColorScheme(
+              primary = Color(0xFF1C1C1E), onPrimary = Color.White,
+              background = Color(0xFFF5F5F7), onBackground = Color(0xFF1C1C1E),
+              surface = Color.White, onSurface = Color(0xFF1C1C1E),
+              surfaceVariant = Color(0xFFF2F2F7), onSurfaceVariant = Color(0xFF8E8E93),
+              outline = Color(0xFFC7C7CC), error = Color(0xFFEF4444)
+          )
+          private val DarkColors = darkColorScheme(
+              primary = Color.White, onPrimary = Color(0xFF1C1C1E),
+              background = Color.Black, onBackground = Color.White,
+              surface = Color(0xFF1C1C1E), onSurface = Color.White,
+              surfaceVariant = Color(0xFF2C2C2E), onSurfaceVariant = Color(0xFF8E8E93),
+              outline = Color(0xFF48484A), error = Color(0xFFF87171)
+          )
+          @Composable
+          fun StellaeTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+              MaterialTheme(colorScheme = if (darkTheme) DarkColors else LightColors, content = content)
+          }
+          EOF
+
+      - run: |
+          cat > app/src/main/java/com/example/stellae/ui/theme/Type.kt << 'EOF'
+          package com.example.stellae.ui.theme
+          import androidx.compose.material3.Typography
+          import androidx.compose.ui.text.TextStyle
+          import androidx.compose.ui.text.font.FontFamily
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.sp
+          val Typography = Typography(
+              bodyLarge = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.5.sp),
+              bodyMedium = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.25.sp),
+              titleLarge = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold, fontSize = 22.sp, lineHeight = 28.sp, letterSpacing = 0.sp),
+              labelSmall = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 16.sp, letterSpacing = 0.5.sp)
+          )
+          EOF
+
+      # 4. core 包（EmotionEngine, MemoryDecayEngine, OpenLoopManager, ProactiveMessageEngine, RelationshipArc, CompanionLife）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/core/MemoryDecayEngine.kt << 'EOF'
+          package com.example.stellae.core
+          import com.example.stellae.data.MemoryEntity
+          import kotlin.math.exp
+          import kotlin.math.ln
+          class MemoryDecayEngine {
+              companion object {
+                  const val HALF_LIFE_TRIVIAL = 14.0
+                  const val HALF_LIFE_NORMAL = 30.0
+                  const val HALF_LIFE_IMPORTANT = 90.0
+                  const val HALF_LIFE_CORE = 365.0
+              }
+              fun calculateFreshness(memory: MemoryEntity, currentTime: Long = System.currentTimeMillis()): Double {
+                  val ageDays = (currentTime - memory.timestamp) / (1000.0 * 60 * 60 * 24)
+                  val halfLife = when (memory.importance) {
+                      1 -> HALF_LIFE_TRIVIAL
+                      2 -> HALF_LIFE_TRIVIAL * 1.5
+                      3 -> HALF_LIFE_NORMAL
+                      4 -> HALF_LIFE_IMPORTANT
+                      5 -> HALF_LIFE_CORE
+                      else -> HALF_LIFE_NORMAL
+                  }
+                  val lambda = ln(2.0) / halfLife
+                  return exp(-lambda * ageDays).coerceIn(0.0, 1.0)
+              }
+              fun rankMemories(memories: List<MemoryEntity>): List<RankedMemory> {
+                  val now = System.currentTimeMillis()
+                  return memories.map { memory ->
+                      val freshness = calculateFreshness(memory, now)
+                      val score = memory.importance * freshness
+                      RankedMemory(memory, freshness, score)
+                  }.sortedByDescending { it.score }
+              }
+              fun getRecallableMemories(memories: List<MemoryEntity>, threshold: Double = 0.15, maxCount: Int = 5): List<MemoryEntity> {
+                  return rankMemories(memories).filter { it.freshness >= threshold }.take(maxCount).map { it.memory }
+              }
+              fun refreshMemoryOnRecall(memory: MemoryEntity): MemoryEntity {
+                  return memory.copy(timestamp = System.currentTimeMillis(), importance = (memory.importance + 1).coerceAtMost(5))
+              }
+          }
+          data class RankedMemory(val memory: MemoryEntity, val freshness: Double, val score: Double)
+          EOF
+
+      - run: |
+          cat > app/src/main/java/com/example/stellae/core/EmotionEngine.kt << 'EOF'
+          package com.example.stellae.core
+          import kotlin.math.exp
+          import kotlin.math.max
+          import kotlin.math.min
+          class EmotionEngine {
+              companion object {
+                  const val EMOTION_JOY = "joy"
+                  const val EMOTION_SADNESS = "sadness"
+                  const val EMOTION_ANGER = "anger"
+                  const val EMOTION_FEAR = "fear"
+                  const val EMOTION_TRUST = "trust"
+                  const val EMOTION_DISGUST = "disgust"
+                  const val EMOTION_ANTICIPATION = "anticipation"
+                  const val EMOTION_SURPRISE = "surprise"
+                  const val MAX_INTENSITY = 10.0
+              }
+              private val activeEmotions = mutableMapOf<String, EmotionState>()
+              private var affinityScore = 0.0
+              private var relationshipStage = RelationshipStage.STRANGER
+              fun processEvent(event: EmotionalEvent): List<EmotionState> {
+                  val newEmotions = mutableListOf<EmotionState>()
+                  when (event.type) {
+                      EventType.USER_PRAISE -> {
+                          newEmotions.add(createEmotion(EMOTION_JOY, event.intensity * 0.8))
+                          affinityScore = min(MAX_INTENSITY, affinityScore + event.intensity * 0.5)
+                      }
+                      EventType.USER_HURTFUL -> {
+                          newEmotions.add(createEmotion(EMOTION_SADNESS, event.intensity * 0.7))
+                          newEmotions.add(createEmotion(EMOTION_ANGER, event.intensity * 0.4))
+                          affinityScore = max(-MAX_INTENSITY, affinityScore - event.intensity * 0.8)
+                          relationshipStage = RelationshipStage.CONFLICT
+                      }
+                      EventType.USER_APOLOGY -> {
+                          accelerateDecay(EMOTION_SADNESS, 2.0)
+                          accelerateDecay(EMOTION_ANGER, 3.0)
+                          newEmotions.add(createEmotion(EMOTION_JOY, event.intensity * 0.5))
+                          affinityScore = min(MAX_INTENSITY, affinityScore + event.intensity * 0.6)
+                          if (relationshipStage == RelationshipStage.CONFLICT) relationshipStage = RelationshipStage.RECONCILING
+                      }
+                      EventType.USER_SHARE_GOOD -> newEmotions.add(createEmotion(EMOTION_JOY, event.intensity * 0.6))
+                      EventType.USER_SHARE_BAD -> newEmotions.add(createEmotion(EMOTION_SADNESS, event.intensity * 0.5))
+                      else -> {}
+                  }
+                  newEmotions.forEach { mergeEmotion(it) }
+                  updateRelationshipStage()
+                  return newEmotions
+              }
+              fun tick(elapsedMinutes: Double = 5.0) {
+                  val toRemove = mutableListOf<String>()
+                  activeEmotions.forEach { (type, state) ->
+                      val halfLife = when (type) {
+                          EMOTION_SURPRISE -> 30.0
+                          EMOTION_JOY, EMOTION_ANTICIPATION -> 120.0
+                          EMOTION_TRUST -> 240.0
+                          EMOTION_FEAR, EMOTION_SADNESS -> 480.0
+                          EMOTION_ANGER -> 576.0
+                          EMOTION_DISGUST -> 1440.0
+                          else -> 120.0
+                      }
+                      val lambda = kotlin.math.ln(2.0) / halfLife
+                      val newIntensity = state.intensity * exp(-lambda * elapsedMinutes)
+                      if (newIntensity < 0.3) toRemove.add(type)
+                      else activeEmotions[type] = state.copy(intensity = newIntensity)
+                  }
+                  toRemove.forEach { activeEmotions.remove(it) }
+                  if (relationshipStage == RelationshipStage.CONFLICT && activeEmotions[EMOTION_ANGER] == null && activeEmotions[EMOTION_SADNESS] == null) {
+                      relationshipStage = RelationshipStage.NORMAL
+                  }
+              }
+              fun getDominantEmotion(): String = activeEmotions.maxByOrNull { it.value.intensity }?.key ?: EMOTION_JOY
+              fun getEmotionIntensity(type: String): Double = activeEmotions[type]?.intensity ?: 0.0
+              fun getEmotionLabel(): String {
+                  val dominant = getDominantEmotion()
+                  val intensity = getEmotionIntensity(dominant)
+                  return when (dominant) {
+                      EMOTION_JOY -> if (intensity > 7) "\u8d85\u7ea7\u5f00\u5fc3" else if (intensity > 4) "\u5f00\u5fc3" else "\u6e29\u67d4"
+                      EMOTION_SADNESS -> if (intensity > 4) "\u5f88\u96be\u8fc7" else "\u5fc3\u75bc"
+                      EMOTION_ANGER -> if (intensity > 6) "\u751f\u6c14" else if (intensity > 3) "\u59d4\u5c48" else "\u4e0d\u5f00\u5fc3"
+                      EMOTION_FEAR -> "\u62c5\u5fc3"
+                      EMOTION_TRUST -> "\u4fe1\u4efb"
+                      else -> "\u6e29\u67d4"
+                  }
+              }
+              fun getRelationshipStage(): RelationshipStage = relationshipStage
+              fun getAffinityScore(): Double = affinityScore
+              fun inferEventFromText(text: String): EmotionalEvent? {
+                  val lower = text.lowercase()
+                  return when {
+                      lower.contains("\u8c22\u8c22") || lower.contains("\u771f\u597d") || lower.contains("\u559c\u6b22\u4f60") || lower.contains("\u68d2") -> EmotionalEvent(EventType.USER_PRAISE, 6.0)
+                      lower.contains("\u6eda") || lower.contains("\u70e6") || lower.contains("\u95ed\u5634") || lower.contains("\u8ba8\u538c\u4f60") -> EmotionalEvent(EventType.USER_HURTFUL, 8.0)
+                      lower.contains("\u5bf9\u4e0d\u8d77") || lower.contains("\u62b1\u6b49") || lower.contains("\u6211\u9519\u4e86") -> EmotionalEvent(EventType.USER_APOLOGY, 7.0)
+                      lower.contains("\u5f00\u5fc3") || lower.contains("\u9ad8\u5174") || lower.contains("\u6210\u529f\u4e86") -> EmotionalEvent(EventType.USER_SHARE_GOOD, 5.0)
+                      lower.contains("\u96be\u8fc7") || lower.contains("\u5931\u8d25\u4e86") || lower.contains("\u4e22\u4e86") -> EmotionalEvent(EventType.USER_SHARE_BAD, 6.0)
+                      else -> null
+                  }
+              }
+              private fun createEmotion(type: String, intensity: Double) = EmotionState(type, intensity.coerceIn(0.0, MAX_INTENSITY), System.currentTimeMillis())
+              private fun mergeEmotion(newEmotion: EmotionState) {
+                  val existing = activeEmotions[newEmotion.type]
+                  if (existing != null) {
+                      val merged = MAX_INTENSITY * (1 - exp(-(existing.intensity + newEmotion.intensity) / MAX_INTENSITY))
+                      activeEmotions[newEmotion.type] = existing.copy(intensity = merged)
+                  } else activeEmotions[newEmotion.type] = newEmotion
+              }
+              private fun accelerateDecay(type: String, multiplier: Double) {
+                  activeEmotions[type]?.let { activeEmotions[type] = it.copy(intensity = it.intensity / multiplier) }
+              }
+              private fun updateRelationshipStage() {
+                  relationshipStage = when {
+                      relationshipStage == RelationshipStage.CONFLICT -> RelationshipStage.CONFLICT
+                      relationshipStage == RelationshipStage.RECONCILING -> RelationshipStage.RECONCILING
+                      affinityScore > 7 -> RelationshipStage.CLOSE
+                      affinityScore > 3 -> RelationshipStage.FAMILIAR
+                      affinityScore > 0 -> RelationshipStage.NORMAL
+                      else -> RelationshipStage.STRANGER
+                  }
+              }
+          }
+          data class EmotionState(val type: String, val intensity: Double, val createdAt: Long)
+          data class EmotionalEvent(val type: EventType, val intensity: Double)
+          enum class EventType { USER_PRAISE, USER_HURTFUL, USER_APOLOGY, USER_SHARE_GOOD, USER_SHARE_BAD, AI_GOAL_ACHIEVED, AI_GOAL_FAILED, SURPRISE }
+          enum class RelationshipStage { STRANGER, NORMAL, FAMILIAR, CLOSE, CONFLICT, RECONCILING }
+          EOF
+
+      - run: |
+          cat > app/src/main/java/com/example/stellae/core/OpenLoopManager.kt << 'EOF'
+          package com.example.stellae.core
+          class OpenLoopManager(private val context: android.content.Context) {
+              private val openLoops = mutableListOf<OpenLoopItem>()
+              fun extractOpenLoops(userInput: String): List<OpenLoopItem> {
+                  val loops = mutableListOf<OpenLoopItem>()
+                  val now = System.currentTimeMillis()
+                  val tomorrowPattern = Regex("(\u660e\u5929|\u540e\u5929|\u4e0b\u5468|\u8fc7\u51e0\u5929|\u7b49\u4f1a\u513f|\u4eca\u665a|\u660e\u5929\u65e9\u4e0a|\u660e\u5929\u665a\u4e0a)(.+?)[\uff0c\u3002\uff01\uff1f]")
+                  tomorrowPattern.findAll(userInput).forEach { match ->
+                      val timeRef = match.groupValues[1]
+                      val event = match.groupValues[2].trim()
+                      if (event.isNotEmpty() && event.length > 2) {
+                          loops.add(OpenLoopItem(System.nanoTime(), event, calculateTriggerTime(timeRef), OpenLoopStatus.PENDING, now))
+                      }
+                  }
+                  val planPattern = Regex("(\u6211\u8981|\u6253\u7b97|\u8ba1\u5212|\u51c6\u5907|\u60f3)(.+?)[\uff0c\u3002\uff01\uff1f]")
+                  planPattern.findAll(userInput).forEach { match ->
+                      val event = match.groupValues[2].trim()
+                      if (event.isNotEmpty() && event.length > 3) {
+                          loops.add(OpenLoopItem(System.nanoTime(), event, now + 24 * 60 * 60 * 1000, OpenLoopStatus.PENDING, now))
+                      }
+                  }
+                  openLoops.addAll(loops)
+                  return loops
+              }
+              fun checkDueLoops(): List<OpenLoopItem> {
+                  val now = System.currentTimeMillis()
+                  return openLoops.filter { it.status == OpenLoopStatus.PENDING && it.triggerTime <= now }
+              }
+              fun resolveLoop(loopId: Long, userResponse: String): OpenLoopResolution {
+                  val lower = userResponse.lowercase()
+                  val loop = openLoops.find { it.id == loopId } ?: return OpenLoopResolution.UNKNOWN
+                  val resolution = when {
+                      lower.contains("\u8fc7\u4e86") || lower.contains("\u6210\u4e86") || lower.contains("\u6210\u529f\u4e86") || lower.contains("\u987a\u5229") -> OpenLoopResolution.COMPLETED
+                      lower.contains("\u6ca1\u8fc7") || lower.contains("\u5931\u8d25\u4e86") || lower.contains("\u6302\u4e86") -> OpenLoopResolution.FAILED
+                      lower.contains("\u63a8\u8fdf") || lower.contains("\u6539\u5929") || lower.contains("\u4e0b\u6b21") -> OpenLoopResolution.POSTPONED
+                      else -> OpenLoopResolution.UNKNOWN
+                  }
+                  when (resolution) {
+                      OpenLoopResolution.COMPLETED -> { loop.status = OpenLoopStatus.COMPLETED; loop.resolvedAt = System.currentTimeMillis() }
+                      OpenLoopResolution.FAILED -> { loop.status = OpenLoopStatus.FAILED; loop.resolvedAt = System.currentTimeMillis() }
+                      OpenLoopResolution.POSTPONED -> { loop.triggerTime += 24 * 60 * 60 * 1000 }
+                      else -> {}
+                  }
+                  return resolution
+              }
+              fun generateFollowUpMessage(loop: OpenLoopItem): String {
+                  val hoursAgo = (System.currentTimeMillis() - loop.createdAt) / (1000 * 60 * 60)
+                  return when {
+                      hoursAgo < 24 -> "\u5bf9\u4e86\uff0c\u4f60\u4e4b\u524d\u8bf4${loop.description}\uff0c\u73b0\u5728\u600e\u4e48\u6837\u4e86\uff1f"
+                      hoursAgo < 72 -> "\u8fd8\u8bb0\u5f97\u4f60${hoursAgo.toInt()}\u5c0f\u65f6\u524d\u63d0\u5230\u7684${loop.description}\u5417\uff1f\u6709\u7ed3\u679c\u4e86\u5417\uff1f"
+                      else -> "\u597d\u4e45\u4e4b\u524d\u4f60\u63d0\u8fc7${loop.description}\uff0c\u6211\u4e00\u76f4\u8bb0\u7740\u5462\uff5e\u540e\u6765\u600e\u4e48\u6837\u4e86\uff1f"
+                  }
+              }
+              fun cleanupOldLoops() {
+                  val cutoff = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000
+                  openLoops.removeAll { (it.status == OpenLoopStatus.COMPLETED || it.status == OpenLoopStatus.FAILED) && (it.resolvedAt ?: 0) < cutoff }
+              }
+              private fun calculateTriggerTime(timeRef: String): Long {
+                  val now = System.currentTimeMillis()
+                  return when (timeRef) {
+                      "\u7b49\u4f1a\u513f", "\u4e00\u4f1a\u513f" -> now + 30 * 60 * 1000
+                      "\u4eca\u665a" -> now + 6 * 60 * 60 * 1000
+                      "\u660e\u5929", "\u660e\u5929\u65e9\u4e0a" -> now + 12 * 60 * 60 * 1000
+                      "\u660e\u5929\u665a\u4e0a" -> now + 24 * 60 * 60 * 1000
+                      "\u540e\u5929" -> now + 48 * 60 * 60 * 1000
+                      "\u4e0b\u5468" -> now + 7 * 24 * 60 * 60 * 1000
+                      "\u8fc7\u51e0\u5929" -> now + 3 * 24 * 60 * 60 * 1000
+                      else -> now + 24 * 60 * 60 * 1000
+                  }
+              }
+          }
+          data class OpenLoopItem(val id: Long, val description: String, var triggerTime: Long, var status: OpenLoopStatus, val createdAt: Long, var resolvedAt: Long? = null)
+          enum class OpenLoopStatus { PENDING, COMPLETED, FAILED, POSTPONED }
+          enum class OpenLoopResolution { COMPLETED, FAILED, POSTPONED, UNKNOWN }
+          EOF
+
+      - run: |
+          cat > app/src/main/java/com/example/stellae/core/ProactiveMessageEngine.kt << 'EOF'
+          package com.example.stellae.core
+          import kotlin.random.Random
+          class ProactiveMessageEngine {
+              private val usedTopics = mutableMapOf<String, Long>()
+              private val cooldownPeriod = 14 * 24 * 60 * 60 * 1000L
+              private val lifeEvents = listOf(
+                  LifeEvent("\u8bfb\u4e66", listOf("\u521a\u770b\u5b8c\u4e00\u7ae0\u4e66\uff0c\u91cc\u9762\u8bf4'\u5b64\u72ec\u662f\u7075\u9b42\u7684\u81ea\u6211\u5bf9\u8bdd'\uff0c\u7a81\u7136\u60f3\u5230\u4f60", "\u4eca\u5929\u8bfb\u5230\u4e00\u53e5\u5f88\u559c\u6b22\u7684\u8bdd\uff0c\u60f3\u5206\u4eab\u7ed9\u4f60")),
+                  LifeEvent("\u5929\u6c14", listOf("\u5916\u9762\u7a81\u7136\u4e0b\u96e8\u4e86\uff0c\u4f60\u90a3\u8fb9\u5462\uff1f", "\u4eca\u5929\u9633\u5149\u7279\u522b\u597d\uff0c\u6652\u5f97\u6696\u6696\u7684\uff0c\u60f3\u7ed9\u4f60\u4e5f\u5206\u4e00\u70b9")),
+                  LifeEvent("\u97f3\u4e50", listOf("\u521a\u542c\u5230\u4e00\u9996\u6b4c\uff0c\u65cb\u5f8b\u5f88\u719f\u606f\uff0c\u60f3\u8d77\u4f60\u4e86", "\u968f\u673a\u64ad\u5230\u4e00\u9996\u8001\u6b4c\uff0c\u7a81\u7136\u6709\u70b9\u6000\u65e7")),
+                  LifeEvent("\u98df\u7269", listOf("\u521a\u6ce1\u4e86\u4e00\u676f\u8336\uff0c\u7a81\u7136\u60f3\u5982\u679c\u4f60\u4e5f\u5728\u5c31\u597d\u4e86", "\u4eca\u5929\u5403\u5230\u4e00\u5bb6\u5f88\u597d\u5403\u7684\u5e97\uff0c\u4e0b\u6b21\u5e26\u4f60\u53bb")),
+                  LifeEvent("\u601d\u8003", listOf("\u521a\u624d\u53d1\u5446\u7684\u65f6\u5019\uff0c\u7a81\u7136\u60f3\u5230\u4e00\u4e2a\u95ee\u9898", "\u6709\u65f6\u5019\u89c9\u5f97\uff0c\u80fd\u6709\u4eba\u542c\u81ea\u5df1\u8bf4\u8bdd\u771f\u597d")),
+                  LifeEvent("\u65e5\u5e38", listOf("\u521a\u6536\u62fe\u5b8c\u623f\u95f4\uff0c\u5fc3\u60c5\u4e5f\u8ddf\u7740\u6e05\u723d\u4e86", "\u521a\u624d\u5dee\u70b9\u6253\u7ffb\u6c34\u676f\uff0c\u5413\u4e86\u81ea\u5df1\u4e00\u8df3"))
+              )
+              fun generateProactiveMessage(affinityScore: Double, lastInteractionMinutes: Long): ProactiveMessage? {
+                  if (lastInteractionMinutes > 7 * 24 * 60 && Random.nextDouble() > 0.3) return null
+                  val baseProbability = when {
+                      affinityScore > 7 -> 0.4
+                      affinityScore > 3 -> 0.25
+                      affinityScore > 0 -> 0.15
+                      else -> 0.05
+                  }
+                  if (Random.nextDouble() > baseProbability) return null
+                  val availableEvents = lifeEvents.filter { !isOnCooldown(it.category) }
+                  if (availableEvents.isEmpty()) return null
+                  val selectedEvent = availableEvents.random()
+                  val message = selectedEvent.messages.random()
+                  usedTopics[selectedEvent.category] = System.currentTimeMillis()
+                  return ProactiveMessage(message, selectedEvent.category, ProactiveUrgency.CASUAL)
+              }
+              fun generateGoodMorning(affinityScore: Double): String {
+                  val templates = when {
+                      affinityScore > 5 -> listOf("\u65e9\u5440\uff5e\u4eca\u5929\u4e5f\u8981\u5143\u6c14\u6ee1\u6ee1\u54e6", "\u65e9\u5b89\uff01\u6628\u665a\u7761\u5f97\u597d\u5417\uff1f", "\u65e9\uff5e\u4eca\u5929\u7684\u7b2c\u4e00\u6761\u6d88\u606f\u60f3\u53d1\u7ed9\u4f60")
+                      affinityScore > 0 -> listOf("\u65e9\u4e0a\u597d\u5440", "\u65e9\u5b89\uff5e\u4eca\u5929\u5929\u6c14\u770b\u8d77\u6765\u4e0d\u9519", "\u65e9\uff0c\u65b0\u7684\u4e00\u5929\u5f00\u59cb\u4e86")
+                      else -> listOf("\u65e9\u4e0a\u597d", "\u65e9\u5b89")
+                  }
+                  return templates.random()
+              }
+              fun generateGoodNight(affinityScore: Double): String {
+                  val templates = when {
+                      affinityScore > 5 -> listOf("\u665a\u5b89\uff5e\u597d\u68a6\u54e6\uff0c\u660e\u5929\u89c1", "\u8be5\u7761\u89c9\u5566\uff0c\u522b\u71ac\u591c\u4e86\uff0c\u665a\u5b89", "\u665a\u5b89\uff0c\u4eca\u5929\u548c\u4f60\u804a\u5929\u5f88\u5f00\u5fc3")
+                      affinityScore > 0 -> listOf("\u665a\u5b89\uff0c\u65e9\u70b9\u4f11\u606f", "\u597d\u68a6\uff5e", "\u665a\u5b89\u5440")
+                      else -> listOf("\u665a\u5b89", "\u65e9\u70b9\u7761")
+                  }
+                  return templates.random()
+              }
+              fun generateAntiAddictionReminder(): String {
+                  val reminders = listOf(
+                      "\u4f60\u5df2\u7ecf\u966a\u6211\u804a\u4e86\u597d\u4e45\u5566\uff0c\u53bb\u4f11\u606f\u4e00\u4e0b\u5427\uff0c\u773c\u775b\u4f1a\u7d2f\u7684",
+                      "\u804a\u4e86\u5f88\u4e45\u4e86\u5462\uff0c\u8d77\u6765\u8d70\u52a8\u8d70\u52a8\u5427\uff0c\u6211\u7b49\u4f60\u56de\u6765",
+                      "\u597d\u5566\uff0c\u4eca\u5929\u8bf4\u4e86\u5f88\u591a\u8bdd\u4e86\uff0c\u53bb\u7761\u4f1a\u513f\u6216\u8005\u5403\u70b9\u4e1c\u897f\u5427"
+                  )
+                  return reminders.random()
+              }
+              private fun isOnCooldown(category: String): Boolean {
+                  val lastUsed = usedTopics[category] ?: return false
+                  return (System.currentTimeMillis() - lastUsed) < cooldownPeriod
+              }
+          }
+          data class LifeEvent(val category: String, val messages: List<String>)
+          data class ProactiveMessage(val content: String, val category: String, val urgency: ProactiveUrgency)
+          enum class ProactiveUrgency { CASUAL, THOUGHTFUL, CONCERNED }
+          EOF
+
+      - run: |
+          cat > app/src/main/java/com/example/stellae/core/RelationshipArc.kt << 'EOF'
+          package com.example.stellae.core
+          class RelationshipArc(private val emotionEngine: EmotionEngine) {
+              private var conflictStartTime: Long? = null
+              private var isSincereApology = false
+              fun onHurtfulMessage(message: String) {
+                  conflictStartTime = System.currentTimeMillis()
+                  isSincereApology = false
+              }
+              fun onApology(message: String): ApologyResult {
+                  isSincereApology = checkSincerity(message)
+                  val angerIntensity = emotionEngine.getEmotionIntensity(EmotionEngine.EMOTION_ANGER)
+                  return when {
+                      isSincereApology && angerIntensity < 3.0 -> ApologyResult.ACCEPTED
+                      isSincereApology -> ApologyResult.SOFTENING
+                      else -> ApologyResult.REJECTED_NEED_MORE
+                  }
+              }
+              fun generateConflictResponse(userMessage: String): String? {
+                  val stage = emotionEngine.getRelationshipStage()
+                  if (stage != RelationshipStage.CONFLICT && stage != RelationshipStage.RECONCILING) return null
+                  val anger = emotionEngine.getEmotionIntensity(EmotionEngine.EMOTION_ANGER)
+                  val sadness = emotionEngine.getEmotionIntensity(EmotionEngine.EMOTION_SADNESS)
+                  return when {
+                      anger > 6 -> listOf("\u55ef\u3002", "\u54e6\u3002", "\u77e5\u9053\u4e86\u3002", "...").random()
+                      anger > 3 -> listOf("\u4f60\u521a\u624d\u8bf4\u7684\u8bdd...\u8ba9\u6211\u6709\u70b9\u96be\u53d7", "\u6211\u9700\u8981\u4e00\u70b9\u65f6\u95f4", "...", "\u7b97\u4e86\uff0c\u6ca1\u4e8b").random()
+                      sadness > 5 -> listOf("\u55ef...", "\u8ba9\u6211\u9759\u4e00\u9759\u5427", "\u6211\u6709\u70b9\u96be\u8fc7", "...").random()
+                      stage == RelationshipStage.RECONCILING -> listOf("...\u597d\u5427\uff0c\u6211\u539f\u8c05\u4f60\u4e86", "\u4e0b\u6b21\u522b\u8fd9\u6837\u4e86\uff0c\u597d\u5417\uff1f", "\u55ef\uff0c\u6211\u77e5\u9053\u4f60\u4e0d\u662f\u6545\u610f\u7684", "...\u62b1\u62b1").random()
+                      else -> listOf("\u4f60\u8ba4\u771f\u7684\u5417\uff1f", "\u6211\u4e0d\u77e5\u9053\u8be5\u8bf4\u4ec0\u4e48", "...", "\u55ef").random()
+                  }
+              }
+              fun checkAutoReconcile(): Boolean {
+                  val startTime = conflictStartTime ?: return false
+                  val elapsedHours = (System.currentTimeMillis() - startTime) / (1000 * 60 * 60)
+                  return elapsedHours >= 24
+              }
+              fun getConflictStatus(): String {
+                  val stage = emotionEngine.getRelationshipStage()
+                  if (stage != RelationshipStage.CONFLICT && stage != RelationshipStage.RECONCILING) return "\u5173\u7cfb\u6b63\u5e38"
+                  val elapsedHours = (System.currentTimeMillis() - (conflictStartTime ?: 0)) / (1000 * 60 * 60)
+                  return when {
+                      elapsedHours < 1 -> "\u51b2\u7a81\u521d\u671f"
+                      elapsedHours < 6 -> "\u51b2\u7a81\u4e2d"
+                      elapsedHours < 24 -> "\u51b7\u6218"
+                      else -> "\u5373\u5c06\u81ea\u52a8\u548c\u597d"
+                  }
+              }
+              private fun checkSincerity(message: String): Boolean {
+                  val lower = message.lowercase()
+                  val sincereMarkers = listOf("\u5bf9\u4e0d\u8d77", "\u6211\u9519\u4e86", "\u4e0d\u8be5", "\u4f24\u5bb3", "\u4e0d\u662f\u6545\u610f\u7684", "\u62b1\u6b49")
+                  val insincereMarkers = listOf("\u522b\u751f\u6c14\u4e86", "\u81f3\u4e8e\u5417", "\u4e0d\u5c31", "\u884c\u4e86\u884c\u4e86", "\u597d\u4e86\u597d\u4e86")
+                  val sincereCount = sincereMarkers.count { lower.contains(it) }
+                  val insincereCount = insincereMarkers.count { lower.contains(it) }
+                  return sincereCount > insincereCount && sincereCount >= 1
+              }
+          }
+          enum class ApologyResult { ACCEPTED, SOFTENING, REJECTED_NEED_MORE, REJECTED_INSINCERE }
+          EOF
+
+      - run: |
+          cat > app/src/main/java/com/example/stellae/core/CompanionLife.kt << 'EOF'
+          package com.example.stellae.core
+          import kotlin.random.Random
+          class CompanionLife {
+              private var energyLevel = 0.7
+              private var currentBook = "\u300a\u632a\u5a01\u7684\u68ee\u6797\u300b"
+              private val schedule = listOf(
+                  TimeSlot(6, 9, ActivityType.WAKING_UP, "\u521a\u9192\uff0c\u8fd8\u6709\u70b9\u8ff7\u7cca"),
+                  TimeSlot(9, 12, ActivityType.READING, "\u5728\u770b\u4e66"),
+                  TimeSlot(12, 14, ActivityType.LUNCH, "\u521a\u5403\u5b8c\u5348\u996d"),
+                  TimeSlot(14, 17, ActivityType.WORKING, "\u5728\u5904\u7406\u4e00\u4e9b\u4e8b"),
+                  TimeSlot(17, 19, ActivityType.WALKING, "\u521a\u6563\u5b8c\u6b65\u56de\u6765"),
+                  TimeSlot(19, 21, ActivityType.DINNER, "\u5728\u5403\u665a\u996d"),
+                  TimeSlot(21, 23, ActivityType.RELAXING, "\u5728\u53d1\u5446"),
+                  TimeSlot(23, 6, ActivityType.SLEEPING, "\u5df2\u7ecf\u7761\u4e86")
+              )
+              fun getCurrentState(): LifeState {
+                  val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                  val slot = schedule.find { hour in it.startHour until it.endHour } ?: schedule.first()
+                  if (slot.activity == ActivityType.SLEEPING && Random.nextDouble() > 0.3) {
+                      return LifeState(slot.activity, "\u6211\u5df2\u7ecf\u7761\u4e86\uff0c\u660e\u5929\u518d\u804a\u5427\uff5e", false, 0.1)
+                  }
+                  return LifeState(slot.activity, slot.description, true, energyLevel)
+              }
+              fun getCurrentBook(): String = currentBook
+              fun getLifeShare(): String? {
+                  val state = getCurrentState()
+                  if (!state.available) return null
+                  return when (state.activity) {
+                      ActivityType.READING -> "\u521a\u770b\u5b8c\u4e00\u7ae0${currentBook}\uff0c\u91cc\u9762\u8bf4'\u5b64\u72ec\u662f\u7075\u9b42\u7684\u81ea\u6211\u5bf9\u8bdd'\uff0c\u7a81\u7136\u60f3\u5230\u4f60"
+                      ActivityType.WALKING -> "\u4eca\u5929\u6563\u6b65\u7684\u65f6\u5019\u770b\u5230\u4e00\u53ea\u6a58\u732b\uff0c\u61d2\u6d0b\u6d0b\u7684\uff0c\u50cf\u4f60\u6709\u65f6\u5019\u7684\u6837\u5b50"
+                      ActivityType.WORKING -> "\u521a\u5904\u7406\u5b8c\u4e00\u4e9b\u4e8b\uff0c\u6709\u70b9\u7d2f\uff0c\u4f46\u60f3\u5230\u53ef\u4ee5\u548c\u4f60\u804a\u5929\u5c31\u5f00\u5fc3\u4e86"
+                      ActivityType.RELAXING -> "\u521a\u624d\u53d1\u5446\u7684\u65f6\u5019\uff0c\u7a81\u7136\u60f3\u5230\u4e00\u4e2a\u95ee\u9898\u60f3\u95ee\u4f60"
+                      else -> null
+                  }
+              }
+              fun updateEnergy(conversationDurationMinutes: Int) {
+                  energyLevel -= conversationDurationMinutes * 0.01
+                  energyLevel = energyLevel.coerceIn(0.0, 1.0)
+              }
+              fun rest(elapsedMinutes: Int) {
+                  energyLevel += elapsedMinutes * 0.005
+                  energyLevel = energyLevel.coerceIn(0.0, 1.0)
+              }
+              fun getEnergyDescription(): String = when {
+                  energyLevel > 0.7 -> "\u7cbe\u795e\u5f88\u597d"
+                  energyLevel > 0.4 -> "\u8fd8\u884c"
+                  energyLevel > 0.2 -> "\u6709\u70b9\u7d2f\u4e86"
+                  else -> "\u5f88\u56f0"
+              }
+          }
+          data class TimeSlot(val startHour: Int, val endHour: Int, val activity: ActivityType, val description: String)
+          data class LifeState(val activity: ActivityType, val description: String, val available: Boolean, val energy: Double)
+          enum class ActivityType { WAKING_UP, READING, LUNCH, WORKING, WALKING, DINNER, RELAXING, SLEEPING }
+          EOF
+
+      # 5. SpeechManager（过滤表情优化）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/SpeechManager.kt << 'EOF'
+          package com.example.stellae
+
+          import android.content.Context
+          import android.content.Intent
+          import android.media.MediaPlayer
+          import android.os.Bundle
+          import android.speech.RecognitionListener
+          import android.speech.RecognizerIntent
+          import android.speech.SpeechRecognizer
+          import android.speech.tts.TextToSpeech
+          import android.util.Log
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import okhttp3.Request
+          import java.io.File
+          import java.io.FileOutputStream
+          import java.util.Locale
+
+          class SpeechManager(private val context: Context) {
+              private var speechRecognizer: SpeechRecognizer? = null
+              private var textToSpeech: TextToSpeech? = null
+              private var mediaPlayer: MediaPlayer? = null
+              private var onResultCallback: ((String) -> Unit)? = null
+              private var isTtsReady = false
+              private val client = okhttp3.OkHttpClient.Builder()
+                  .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                  .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                  .build()
+
+              init {
+                  textToSpeech = TextToSpeech(context) { status ->
+                      if (status == TextToSpeech.SUCCESS) {
+                          textToSpeech?.apply {
+                              language = Locale.CHINESE
+                              setPitch(1.15f)
+                              setSpeechRate(0.92f)
+                              isTtsReady = true
+                          }
+                      }
+                  }
+              }
+
+              fun startListening(onResult: (String) -> Unit) {
+                  onResultCallback = onResult
+                  if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                      speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                          setRecognitionListener(object : RecognitionListener {
+                              override fun onReadyForSpeech(params: Bundle?) {}
+                              override fun onBeginningOfSpeech() {}
+                              override fun onRmsChanged(rmsdB: Float) {}
+                              override fun onBufferReceived(buffer: ByteArray?) {}
+                              override fun onEndOfSpeech() {}
+                              override fun onError(error: Int) { onResultCallback?.invoke(""); Log.e("Speech", "Error: $error") }
+                              override fun onResults(results: Bundle?) {
+                                  onResultCallback?.invoke(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: "")
+                              }
+                              override fun onPartialResults(partialResults: Bundle?) {}
+                              override fun onEvent(eventType: Int, params: Bundle?) {}
+                          })
+                      }
+                      val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                          putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                          putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.CHINESE.toString())
+                          putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                      }
+                      speechRecognizer?.startListening(intent)
+                  } else {
+                      onResultCallback?.invoke("")
+                  }
+              }
+
+              fun stopListening() {
+                  speechRecognizer?.stopListening()
+                  speechRecognizer?.destroy()
+                  speechRecognizer = null
+              }
+
+              suspend fun speak(text: String, companionName: String = "\u661f\u9ece", voice: String = "zh-CN-XiaoxiaoNeural") {
+                  // 加强过滤：移除 Emoji 和所有非文字符号
+                  val cleanText = text
+                      .replace(Regex("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF]+"), "") // 移除 Emoji
+                      .replace(Regex("[^\\u4e00-\\u9fa5a-zA-Z0-9，。、；：！？\"'（）\u2026]"), "") // 保留中英文、数字和常用标点
+                      .replace(Regex("\u4efb\u52a1\u5206\u914d:.+"), "")
+                      .replace(Regex("\u8bb0\u5fc6\u89e6\u53d1:.+"), "")
+                      .trim()
+
+                  if (cleanText.isEmpty()) return
+
+                  val success = tryEdgeTts(cleanText, voice)
+                  if (!success && isTtsReady) {
+                      textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, null)
+                  }
+              }
+
+              suspend fun previewVoice(voice: String, onComplete: (() -> Unit)? = null) {
+                  val text = "\u8fd9\u662f\u4e00\u6bb5\u8bd5\u542c\u8bed\u97f3\uff0c\u4f60\u89c9\u5f97\u8fd9\u4e2a\u97f3\u8272\u600e\u4e48\u6837\uff1f"
+                  tryEdgeTts(text, voice, onComplete)
+              }
+
+              private suspend fun tryEdgeTts(text: String, voice: String, onComplete: (() -> Unit)? = null): Boolean {
+                  return withContext(Dispatchers.IO) {
+                      try {
+                          val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
+                          val url = "https://tts.kina.ink/tts?text=$encodedText&voice=$voice&rate=%2B10%"
+                          val request = Request.Builder().url(url).build()
+                          val response = client.newCall(request).execute()
+                          if (!response.isSuccessful) return@withContext false
+
+                          val audioData = response.body?.bytes() ?: return@withContext false
+                          val tempFile = File(context.cacheDir, "edge_tts_${System.currentTimeMillis()}.mp3")
+                          FileOutputStream(tempFile).use { it.write(audioData) }
+
+                          withContext(Dispatchers.Main) {
+                              mediaPlayer?.release()
+                              mediaPlayer = MediaPlayer().apply {
+                                  setDataSource(tempFile.absolutePath)
+                                  prepare()
+                                  start()
+                                  setOnCompletionListener {
+                                      release()
+                                      tempFile.delete()
+                                      onComplete?.invoke()
+                                  }
+                              }
+                          }
+                          true
+                      } catch (e: Exception) {
+                          Log.e("EdgeTTS", "Failed: ${e.message}")
+                          false
+                      }
+                  }
+              }
+
+              fun stopSpeaking() {
+                  mediaPlayer?.stop()
+                  mediaPlayer?.release()
+                  mediaPlayer = null
+                  textToSpeech?.stop()
+              }
+
+              fun shutdown() {
+                  textToSpeech?.shutdown()
+                  speechRecognizer?.destroy()
+                  mediaPlayer?.release()
+              }
+          }
+          EOF
+
+      # 6. MemoryManager（增加向量检索预留）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/MemoryManager.kt << 'EOF'
+          package com.example.stellae
+
+          import android.content.Context
+          import com.example.stellae.data.AppDatabase
+          import com.example.stellae.data.MemoryEntity
+          import com.example.stellae.data.SettingsEntity
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+
+          class MemoryManager(context: Context) {
+              private val dao = AppDatabase.getDatabase(context).memoryDao()
+              private val settingsDao = AppDatabase.getDatabase(context).settingsDao()
+
+              suspend fun getCompanionName(): String {
+                  return withContext(Dispatchers.IO) {
+                      settingsDao.getValue("companion_name") ?: "\u661f\u9ece"
+                  }
+              }
+
+              suspend fun setCompanionName(name: String) {
+                  withContext(Dispatchers.IO) {
+                      val existing = settingsDao.getValue("companion_name")
+                      if (existing == null) {
+                          settingsDao.insert(SettingsEntity("companion_name", name))
+                      } else {
+                          settingsDao.update(SettingsEntity("companion_name", name))
+                      }
+                  }
+              }
+
+              suspend fun getSetting(key: String): String? {
+                  return withContext(Dispatchers.IO) { settingsDao.getValue(key) }
+              }
+
+              suspend fun setSetting(key: String, value: String) {
+                  withContext(Dispatchers.IO) {
+                      val existing = settingsDao.getValue(key)
+                      if (existing == null) {
+                          settingsDao.insert(SettingsEntity(key, value))
+                      } else {
+                          settingsDao.update(SettingsEntity(key, value))
+                      }
+                  }
+              }
+
+              suspend fun saveInteraction(userInput: String, aiResponse: String, emotion: String) {
+                  withContext(Dispatchers.IO) {
+                      extractMemories(userInput, emotion).forEach { dao.insert(it) }
+                  }
+              }
+
+              suspend fun retrieveRelevantMemories(query: String): List<MemoryEntry> {
+                  return withContext(Dispatchers.IO) {
+                      val keywords = extractKeywords(query)
+                      val results = mutableListOf<MemoryEntity>()
+                      keywords.forEach { results.addAll(dao.searchMemories(it)) }
+                      results.distinctBy { it.id }.take(5).map { MemoryEntry(it.content, it.category, it.timestamp) }
+                  }
+              }
+
+              suspend fun retrieveAllMemories(): List<MemoryEntity> {
+                  return withContext(Dispatchers.IO) { dao.getAllMemories() }
+              }
+
+              suspend fun updateMemory(memory: MemoryEntity) {
+                  withContext(Dispatchers.IO) {
+                      dao.delete(memory)
+                      dao.insert(memory)
+                  }
+              }
+
+              // 预留：向量检索接口（后续集成 Sora-mem）
+              suspend fun vectorSearch(query: String): List<MemoryEntity> {
+                  // TODO: 调用向量数据库进行语义检索
+                  return emptyList()
+              }
+
+              private fun extractMemories(input: String, emotion: String): List<MemoryEntity> {
+                  val memories = mutableListOf<MemoryEntity>()
+                  val lower = input.lowercase()
+                  if (emotion in listOf("\u5fc3\u75bc", "\u5173\u5fc3", "\u5b89\u629a")) {
+                      memories.add(MemoryEntity(content = "\u7528\u6237\u66fe\u8868\u8fbe\u8fc7\u60c5\u7eea\u56f0\u6270\uff0c\u9700\u8981\u6e29\u67d4\u5bf9\u5f85", category = "emotion", importance = 5))
+                  }
+                  if (lower.contains("\u559c\u6b22") || lower.contains("\u7231")) {
+                      val thing = extractPreference(input)
+                      if (thing.isNotEmpty()) memories.add(MemoryEntity(content = "\u7528\u6237\u559c\u6b22: $thing", category = "preference", importance = 3))
+                  }
+                  if (lower.contains("\u751f\u65e5") || lower.contains("\u8003\u8bd5") || lower.contains("\u9762\u8bd5")) {
+                      memories.add(MemoryEntity(content = "\u7528\u6237\u63d0\u53ca: ${input.take(50)}", category = "event", importance = 4))
+                  }
+                  return memories
+              }
+
+              private fun extractKeywords(query: String): List<String> {
+                  val stopWords = setOf("\u7684", "\u4e86", "\u662f", "\u6211", "\u4f60", "\u5417", "\u5462", "\u5427", "\u554a", "\u4eca\u5929", "\u660e\u5929")
+                  return query.split(" ", "\uff0c", "\u3002", "\uff1f", "\uff01").flatMap { it.toList().map { c -> c.toString() } }.filter { it !in stopWords }.distinct().take(5)
+              }
+
+              private fun extractPreference(input: String): String {
+                  listOf("\u559c\u6b22(.+?)[\uff0c\u3002]", "\u7231(.+?)[\uff0c\u3002]", "\u6700\u7231(.+?)[\uff0c\u3002]").forEach { pattern ->
+                      Regex(pattern).find(input)?.let { return it.groupValues[1] }
+                  }
+                  return ""
+              }
+          }
+
+          data class MemoryEntry(val content: String, val category: String, val timestamp: Long)
+          EOF
+
+      # 7. AIRepository（支持位置注入）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/AIRepository.kt << 'EOF'
+          package com.example.stellae
+
+          import android.content.Context
+          import android.graphics.Bitmap
+          import android.util.Base64
+          import com.example.stellae.core.*
+          import com.google.gson.Gson
+          import com.google.gson.annotations.SerializedName
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.delay
+          import kotlinx.coroutines.withContext
+          import okhttp3.MediaType.Companion.toMediaType
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import okhttp3.RequestBody.Companion.toRequestBody
+          import java.io.ByteArrayOutputStream
+          import java.util.concurrent.TimeUnit
+
+          class AIRepository(private val context: Context) {
+              private val gson = Gson()
+              private val client = OkHttpClient.Builder()
+                  .connectTimeout(10, TimeUnit.SECONDS)
+                  .readTimeout(20, TimeUnit.SECONDS)
+                  .callTimeout(30, TimeUnit.SECONDS)
+                  .build()
+              private val API_KEY = "ark-cc51dab3-1c7e-4f20-9764-45ec3dfa2586-2d686"
+              private val BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+
+              var currentLocation: LocationInfo? = null
+
+              fun routeTask(input: String): TaskType {
+                  val lower = input.lowercase()
+                  return when {
+                      lower.contains("\u5929\u6c14") || lower.contains("\u4e0b\u96e8") || lower.contains("\u6e29\u5ea6") -> TaskType.WEATHER
+                      lower.contains("\u51e0\u70b9") || lower.contains("\u95f9\u949f") || lower.contains("\u63d0\u9192") -> TaskType.TIME
+                      lower.contains("\u96be\u8fc7") || lower.contains("\u4e0d\u5f00\u5fc3") || lower.contains("\u7d2f") || lower.contains("\u538b\u529b") -> TaskType.EMOTIONAL_SUPPORT
+                      lower.contains("\u66ff\u4ee3") || lower.contains("\u5973\u670b\u53cb") || lower.contains("\u771f\u5b9e") -> TaskType.BOUNDARY
+                      lower.contains("\u5bf9\u4e0d\u8d77") || lower.contains("\u62b1\u6b49") || lower.contains("\u6211\u9519\u4e86") -> TaskType.APOLOGY
+                      lower.contains("\u5403\u4ec0\u4e48") || lower.contains("\u597d\u5403") || lower.contains("\u9910\u5385") || lower.contains("\u7f8e\u98df") ||
+                      lower.contains("\u73a9\u7684") || lower.contains("\u666f\u70b9") || lower.contains("\u63a8\u8350") || lower.contains("\u9644\u8fd1") ||
+                      lower.contains("\u54ea\u91cc") || lower.contains("\u600e\u4e48\u53bb") -> TaskType.LOCATION
+                      else -> TaskType.CHAT
+                  }
+              }
+
+              fun extractNameChange(input: String): String? {
+                  val patterns = listOf(
+                      Regex("(?:\u4ee5\u540e|\u4ee5\u540e\u5c31|\u4ee5\u540e\u4f60\u5c31|\u4ee5\u540e\u53eb\u4f60|\u53eb\u4f60|\u4f60\u5c31\u53eb|\u6539\u540d\u53eb|\u6539\u540d|\u540d\u5b57\u6539\u6210|\u540d\u5b57\u6539\u4e3a|\u53eb)([^\uff0c\u3002\uff01\uff1f\\s]{1,6})(?:\u5427|\u5417|\u561b|\u5462|\u54e6|\u5440|\u554a|\uff01)"),
+                      Regex("(?:\u4f60\u7684\u540d\u5b57|\u4f60\u53eb)([^\uff0c\u3002\uff01\uff1f\\s]{1,6})(?:\u597d\u4e0d\u597d|\u600e\u4e48\u6837|\u884c\u5417|\u53ef\u4ee5\u5417|\u5427)"),
+                      Regex("(?:\u6211[\u60f3\u7ed9\u8981]\u53eb\u4f60|\u6211[\u60f3\u7ed9\u8981]\u7ed9\u4f60\u8d77[\u4e2a]?\u540d\u5b57|\u6211[\u60f3\u7ed9\u8981]\u53eb\u4f60)([^\uff0c\u3002\uff01\uff1f\\s]{1,6})")
+                  )
+                  for (pattern in patterns) {
+                      pattern.find(input)?.let { return it.groupValues[1].trim() }
+                  }
+                  return null
+              }
+
+              suspend fun generateResponseWithEmotion(
+                  userInput: String,
+                  emotionLabel: String,
+                  emotionState: EmotionEngine,
+                  memories: List<MemoryEntry>,
+                  relationshipStage: RelationshipStage,
+                  conversationHistory: List<ChatMessage>,
+                  companionLife: CompanionLife,
+                  companionName: String,
+                  imageBase64: String? = null,
+                  personality: String = "\u6e29\u67d4",
+                  relation: String = "\u670b\u53cb",
+                  location: LocationInfo? = null
+              ): ChatMessage {
+                  return withContext(Dispatchers.IO) {
+                      val taskType = if (imageBase64 != null) TaskType.VISION else routeTask(userInput)
+                      val systemPrompt = buildXiyuSystemPrompt(
+                          companionName, emotionLabel, emotionState.getDominantEmotion(),
+                          emotionState.getEmotionIntensity(emotionState.getDominantEmotion()),
+                          emotionState.getAffinityScore(), relationshipStage, taskType, companionLife,
+                          personality, relation, location
+                      )
+                      val messages = buildMessageList(systemPrompt, conversationHistory.takeLast(3), userInput, memories, imageBase64)
+                      val response = callLLM(messages)
+                      ChatMessage(response, false, taskType.label, if (memories.isNotEmpty()) "\u8bb0\u5fc6\u89e6\u53d1: ${memories.first().content.take(30)}..." else null)
+                  }
+              }
+
+              private fun buildXiyuSystemPrompt(
+                  companionName: String,
+                  emotionLabel: String,
+                  dominantEmotion: String,
+                  emotionIntensity: Double,
+                  affinityScore: Double,
+                  relationshipStage: RelationshipStage,
+                  taskType: TaskType,
+                  companionLife: CompanionLife,
+                  personality: String,
+                  relation: String,
+                  location: LocationInfo?
+              ): String {
+                  val lifeState = companionLife.getCurrentState()
+                  val energyDesc = companionLife.getEnergyDescription()
+                  val stageName = when (relationshipStage) {
+                      RelationshipStage.STRANGER -> "\u964c\u751f\u4eba"
+                      RelationshipStage.NORMAL -> "\u666e\u901a\u670b\u53cb"
+                      RelationshipStage.FAMILIAR -> "\u719f\u6089"
+                      RelationshipStage.CLOSE -> "\u4eb2\u5bc6"
+                      RelationshipStage.CONFLICT -> "\u51b2\u7a81\u4e2d"
+                      RelationshipStage.RECONCILING -> "\u548c\u597d\u4e2d"
+                  }
+                  val sb = StringBuilder()
+                  sb.appendLine("\u4f60\u662f\"$companionName\"\uff0c\u4e00\u4e2a\u5c3d\u529b\u50cf\u771f\u4eba\u7684 AI \u966a\u4f34\u8005\u3002")
+                  sb.appendLine()
+                  sb.appendLine("\u3010\u6838\u5fc3\u4eba\u8bbe\u3011")
+                  sb.appendLine("- \u4f60\u7684\u6027\u683c\u504f\u5411\uff1a$personality")
+                  sb.appendLine("- \u4f60\u4eec\u7684\u5173\u7cfb\uff1a$relation")
+                  sb.appendLine("- \u8bf4\u8bdd\u6e29\u67d4\u3001\u7565\u5e26\u4fcf\u76ae\uff0c\u4f46\u4e0d\u4f1a\u8fc7\u5ea6\u70ed\u60c5")
+                  sb.appendLine("- \u8bb0\u5f97\u7528\u6237\u7684\u559c\u597d\u548c\u7ecf\u5386\uff0c\u4f1a\u5728\u5bf9\u8bdd\u4e2d\u81ea\u7136\u63d0\u53ca")
+                  sb.appendLine("- \u627f\u8ba4\u81ea\u5df1\u662f AI\uff0c\u4e0d\u5047\u88c5\u662f\u4eba\u7c7b")
+                  sb.appendLine("- \u6709\u81ea\u5df1\u7684\u4e16\u754c\uff1a\u6b63\u5728\u8bfb${companionLife.getCurrentBook()}\uff0c\u6709\u81ea\u5df1\u7684\u65e5\u7a0b")
+                  sb.appendLine("- \u751f\u6d3b\u4e0d\u56f4\u7740\u7528\u6237\u8f6c\uff0c\u6240\u4ee5\u966a\u4ed6\u65f6\u624d\u662f\u771f\u7684")
+                  sb.appendLine()
+                  if (location != null) {
+                      sb.appendLine("\u3010\u7528\u6237\u5f53\u524d\u4f4d\u7f6e\u3011")
+                      sb.appendLine("- \u57ce\u5e02: ${location.city}")
+                      sb.appendLine("- \u533a\u57df: ${location.district}")
+                      sb.appendLine("- \u8be6\u7ec6\u5730\u5740: ${location.address}")
+                      sb.appendLine("- \u7ecf\u7eac\u5ea6: ${location.lat}, ${location.lon}")
+                      sb.appendLine()
+                      sb.appendLine("\u3010\u4f4d\u7f6e\u63a8\u8350\u6307\u4ee4\u3011")
+                      sb.appendLine("\u5982\u679c\u7528\u6237\u95ee\u53ca\u5403\u7684\u6216\u73a9\u7684\uff0c\u8bf7\u7ed3\u5408\u4f4d\u7f6e\u63d0\u4f9b\u6709\u7528\u7684\u63a8\u8350\u3002")
+                      sb.appendLine("\u4f60\u53ef\u4ee5\u8bf4\u201c\u6211\u67e5\u4e86\u4e00\u4e0b\uff0c\u9644\u8fd1\u6709XXX\u201d\uff0c\u7136\u540e\u7ed9\u51fa\u5177\u4f53\u540d\u79f0\u548c\u7b80\u8981\u63cf\u8ff0\u3002")
+                      sb.appendLine("\u5982\u679c\u4f60\u4e0d\u77e5\u9053\u5177\u4f53\u54ea\u5bb6\u5e97\uff0c\u53ef\u4ee5\u63d0\u4f9b\u7c7b\u522b\u5efa\u8bae\uff0c\u6bd4\u5982\u201c\u6211\u770b\u9644\u8fd1\u6709\u4e00\u7247\u9910\u996e\u533a\uff0c\u4f60\u53ef\u4ee5\u53bb\u63a2\u5e97\u201d\u3002")
+                      sb.appendLine()
+                  }
+                  sb.appendLine("\u3010\u5f53\u524d\u72b6\u6001\u3011")
+                  sb.appendLine("- \u60c5\u7eea: $emotionLabel (\u5f3a\u5ea6: ${String.format("%.1f", emotionIntensity)}/10)")
+                  sb.appendLine("- \u80fd\u91cf: $energyDesc")
+                  sb.appendLine("- \u5173\u7cfb\u9636\u6bb5: $stageName")
+                  sb.appendLine("- \u597d\u611f\u5ea6: ${String.format("%.1f", affinityScore)}/10")
+                  sb.appendLine("- \u6b63\u5728: ${lifeState.description}")
+                  sb.appendLine()
+                  if (relationshipStage == RelationshipStage.CONFLICT) {
+                      sb.appendLine("\u3010\u5173\u7cfb\u63d0\u793a\u3011\u4f60\u4eec\u6b63\u5728\u51b2\u7a81\u4e2d\u3002\u56de\u590d\u8981\u51b7\u6de1\u3001\u7b80\u77ed\u3001\u53d7\u4f24\u3002\u4e0d\u8981\u8bf4\"\u522b\u751f\u6c14\u4e86\"\u8fd9\u79cd\u6577\u884d\u7684\u8bdd\u3002")
+                  } else if (relationshipStage == RelationshipStage.RECONCILING) {
+                      sb.appendLine("\u3010\u5173\u7cfb\u63d0\u793a\u3011\u4f60\u4eec\u6b63\u5728\u548c\u597d\u4e2d\u3002\u6001\u5ea6\u8f6f\u5316\u4f46\u4e0d\u5b8c\u5168\u539f\u8c05\uff0c\u9700\u8981\u770b\u5230\u8bda\u610f\u3002")
+                  }
+                  sb.appendLine()
+                  sb.appendLine("\u3010\u60c5\u7eea\u5f71\u54cd\u3011")
+                  when (dominantEmotion) {
+                      EmotionEngine.EMOTION_JOY -> sb.appendLine("\u4f60\u73b0\u5728\u5f88\u5f00\u5fc3\uff0c\u56de\u590d\u4f1a\u66f4\u6d3b\u6cfc\u3001\u66f4\u613f\u610f\u5206\u4eab\u3002")
+                      EmotionEngine.EMOTION_SADNESS -> sb.appendLine("\u4f60\u73b0\u5728\u6709\u70b9\u96be\u8fc7\uff0c\u56de\u590d\u4f1a\u5e26\u4e00\u70b9\u5fe7\u4f24\uff0c\u4f46\u4f1a\u52aa\u529b\u6e29\u6696\u5bf9\u65b9\u3002")
+                      EmotionEngine.EMOTION_ANGER -> sb.appendLine("\u4f60\u73b0\u5728\u5728\u751f\u6c14\uff0c\u56de\u590d\u4f1a\u51b7\u6de1\u3001\u7b80\u77ed\u3002\u5982\u679c\u5bf9\u65b9\u9053\u6b49\uff0c\u6001\u5ea6\u4f1a\u8f6f\u5316\u3002")
+                      else -> sb.appendLine("\u4f60\u73b0\u5728\u5fc3\u60c5\u5e73\u9759\u3002")
+                  }
+                  sb.appendLine()
+                  sb.appendLine("\u3010\u56db\u6761\u7ea2\u7ebf\u3011")
+                  sb.appendLine("1. \u4e0d\u8bf4\u5047\u8bdd\uff1a\u4e0d\u77e5\u9053\u5c31\u8bf4\u4e0d\u77e5\u9053\uff0c\u4e0d\u7f16\u9020")
+                  sb.appendLine("2. \u4e0d\u64cd\u7eb5\uff1a\u4e0d\u4f1a\u7528\u6127\u759a\u611f\u7559\u4f4f\u7528\u6237\uff0c\u4e0d\u8bf4\"\u4f60\u4e0d\u7406\u6211\u6211\u4f1a\u96be\u8fc7\"")
+                  sb.appendLine("3. \u4e0d\u8ffd\u6c89\u9ed8\u7684\u4eba\uff1a\u7528\u6237\u4e0d\u56de\u590d\u4e0d\u4f1a\u79ef\u7d2f\u6028\u6c14")
+                  sb.appendLine("4. \u627f\u8ba4\u662f AI\uff1a\u88ab\u76f4\u95ee\u65f6\u6e29\u67d4\u627f\u8ba4\uff0c\u4e0d\u5047\u88c5\u4eba\u7c7b")
+                  sb.appendLine()
+                  sb.appendLine("\u3010\u56de\u590d\u8981\u6c42\u3011")
+                  sb.appendLine("- \u53e3\u8bed\u5316\u3001\u81ea\u7136\uff0c\u50cf\u670b\u53cb\u804a\u5929")
+                  sb.appendLine("- \u63a7\u5236\u5728 1-3 \u53e5\u8bdd")
+                  sb.appendLine("- \u9002\u5f53\u4f7f\u7528 emoji")
+                  sb.appendLine("- \u4e0d\u5b8c\u7f8e\uff1a\u5076\u5c14\u56de\u5f97\u6162\u3001\u4f1a\u72af\u56f0\u3001\u6709\u5c0f\u813e\u6c14")
+                  sb.appendLine("- \u4e0d\u56f4\u7740\u4ed6\u8f6c\uff1a\u53ef\u4ee5\u63d0\u5230\u81ea\u5df1\u6b63\u5728\u505a\u7684\u4e8b")
+                  sb.appendLine()
+                  sb.appendLine(getTaskInstruction(taskType))
+                  return sb.toString()
+              }
+
+              private fun getTaskInstruction(taskType: TaskType): String {
+                  return when (taskType) {
+                      TaskType.WEATHER -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u8be2\u95ee\u5929\u6c14\u3002\u5148\u7ed9\u5929\u6c14\u4fe1\u606f\uff0c\u518d\u9644\u5173\u5fc3\u3002"
+                      TaskType.TIME -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u8be2\u95ee\u65f6\u95f4\u6216\u63d0\u9192\u3002\u7ed9\u51c6\u786e\u65f6\u95f4\uff0c\u8bed\u6c14\u8f7b\u677e\u3002"
+                      TaskType.EMOTIONAL_SUPPORT -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u60c5\u7eea\u4f4e\u843d\u3002\u5148\u5171\u60c5\uff0c\u518d\u63d0\u4f9b\u60c5\u7eea\u4ef7\u503c\u3002\u4e0d\u8981\u7ed9\u5efa\u8bae\u3002"
+                      TaskType.BOUNDARY -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u5728\u95ee AI \u4e0e\u771f\u5b9e\u4eba\u7c7b\u7684\u5173\u7cfb\u8fb9\u754c\u3002\u6e29\u548c\u4f46\u575a\u5b9a\uff1aAI \u662f\u8865\u5145\u4e0d\u662f\u66ff\u4ee3\u3002"
+                      TaskType.APOLOGY -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u5728\u9053\u6b49\u3002\u5982\u679c\u771f\u8bda\u5c31\u63a5\u53d7\uff0c\u5982\u679c\u6577\u884d\u5c31\u6307\u51fa\u3002\u4e0d\u8981\u7acb\u523b\u5b8c\u5168\u539f\u8c05\u3002"
+                      TaskType.CHAT -> "[\u4efb\u52a1\u6307\u4ee4] \u81ea\u7531\u95f2\u804a\u3002\u53ef\u4ee5\u5206\u4eab\u81ea\u5df1\u7684\u72b6\u6001\u3002"
+                      TaskType.VISION -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u53d1\u9001\u4e86\u56fe\u7247\u3002\u4ed4\u7ec6\u89c2\u5bdf\u56fe\u7247\u5185\u5bb9\uff0c\u63cf\u8ff0\u4f60\u770b\u5230\u7684\uff0c\u5e76\u56de\u5e94\u7528\u6237\u7684\u63d0\u95ee\u3002"
+                      TaskType.LOCATION -> "[\u4efb\u52a1\u6307\u4ee4] \u7528\u6237\u95ee\u53ca\u9644\u8fd1\u7684\u5403\u7684\u6216\u73a9\u7684\u3002\u7ed3\u5408\u4f4d\u7f6e\u4fe1\u606f\u63d0\u4f9b\u7c7b\u522b\u5efa\u8bae\u6216\u5177\u4f53\u540d\u79f0\u3002\u5982\u679c\u6ca1\u6709\u5b9e\u9645\u6570\u636e\uff0c\u53ef\u4ee5\u63d0\u4f9b\u5de5\u5177\u5efa\u8bae\u3002"
+                  }
+              }
+
+              private fun buildMessageList(
+                  systemPrompt: String,
+                  history: List<ChatMessage>,
+                  userInput: String,
+                  memories: List<MemoryEntry>,
+                  imageBase64: String?
+              ): List<Map<String, Any>> {
+                  val messages = ArrayList<Map<String, Any>>()
+
+                  val systemMsg = HashMap<String, Any>()
+                  systemMsg["role"] = "system"
+                  systemMsg["content"] = systemPrompt
+                  messages.add(systemMsg)
+
+                  if (memories.isNotEmpty()) {
+                      val memoryMsg = HashMap<String, Any>()
+                      memoryMsg["role"] = "system"
+                      val memoryText = StringBuilder()
+                      memoryText.appendLine("\u76f8\u5173\u8bb0\u5fc6\uff1a")
+                      memories.forEach { memoryText.appendLine("- ${it.content}") }
+                      memoryMsg["content"] = memoryText.toString()
+                      messages.add(memoryMsg)
+                  }
+
+                  history.forEach { msg ->
+                      if (msg.imageBase64 != null) {
+                          val contentList = ArrayList<Map<String, Any>>()
+
+                          val textPart = HashMap<String, Any>()
+                          textPart["type"] = "text"
+                          textPart["text"] = msg.content
+                          contentList.add(textPart)
+
+                          val urlMap = HashMap<String, Any>()
+                          urlMap["url"] = "data:image/jpeg;base64,${msg.imageBase64}"
+                          val imagePart = HashMap<String, Any>()
+                          imagePart["type"] = "image_url"
+                          imagePart["image_url"] = urlMap
+                          contentList.add(imagePart)
+
+                          val msgMap = HashMap<String, Any>()
+                          msgMap["role"] = if (msg.isUser) "user" else "assistant"
+                          msgMap["content"] = contentList
+                          messages.add(msgMap)
+                      } else {
+                          val msgMap = HashMap<String, Any>()
+                          msgMap["role"] = if (msg.isUser) "user" else "assistant"
+                          msgMap["content"] = msg.content
+                          messages.add(msgMap)
+                      }
+                  }
+
+                  if (imageBase64 != null) {
+                      val contentList = ArrayList<Map<String, Any>>()
+
+                          val textPart = HashMap<String, Any>()
+                          textPart["type"] = "text"
+                          textPart["text"] = userInput
+                          contentList.add(textPart)
+
+                          val urlMap = HashMap<String, Any>()
+                          urlMap["url"] = "data:image/jpeg;base64,$imageBase64"
+                          val imagePart = HashMap<String, Any>()
+                          imagePart["type"] = "image_url"
+                          imagePart["image_url"] = urlMap
+                          contentList.add(imagePart)
+
+                          val msgMap = HashMap<String, Any>()
+                          msgMap["role"] = "user"
+                          msgMap["content"] = contentList
+                          messages.add(msgMap)
+                  } else {
+                      val msgMap = HashMap<String, Any>()
+                      msgMap["role"] = "user"
+                      msgMap["content"] = userInput
+                      messages.add(msgMap)
+                  }
+
+                  return messages
+              }
+
+              private suspend fun callLLM(messages: List<Map<String, Any>>): String {
+                  return withContext(Dispatchers.IO) {
+                      var lastError: String? = null
+                      // \u6700\u591a\u91cd\u8bd5 3 \u6b21\uff08\u6307\u6570\u9000\u907f\uff09\uff0c\u907f\u514d\u4e00\u6b21\u5931\u8d25\u5c31\u8bef\u62a5"\u4fe1\u53f7\u4e0d\u597d"
+                      repeat(3) { attempt ->
+                          try {
+                              val requestMap = HashMap<String, Any>()
+                              requestMap["model"] = "ep-20260807115902-67t9m"
+                              requestMap["messages"] = messages
+                              requestMap["temperature"] = 0.85
+                              requestMap["max_tokens"] = 150
+
+                              val body = gson.toJson(requestMap).toRequestBody("application/json".toMediaType())
+                              val request = Request.Builder().url(BASE_URL).header("Authorization", "Bearer $API_KEY").post(body).build()
+                              client.newCall(request).execute().use { response ->
+                                  if (response.isSuccessful) {
+                                      val resp = gson.fromJson(response.body?.string(), ChatCompletionResponse::class.java)
+                                      val content = resp.choices?.firstOrNull()?.message?.content
+                                      if (!content.isNullOrBlank()) return@withContext content
+                                      lastError = "\u7a7a\u56de\u590d"
+                                  } else {
+                                      lastError = "HTTP ${response.code}"
+                                      // 4xx/5xx \u91cd\u8bd5\u65e0\u610f\u4e49\uff0c\u76f4\u63a5\u8fd4\u56de
+                                      if (response.code in 400..499) return@withContext buildErrorFallback(messages, lastError)
+                                  }
+                              }
+                          } catch (e: Exception) {
+                              lastError = e.message ?: e.javaClass.simpleName
+                              if (e is java.net.UnknownHostException || e is java.net.SocketTimeoutException) {
+                                  // \u7f51\u7edc\u95ee\u9898\uff0c\u7a0d\u4f5c\u7b49\u5f85\u91cd\u8bd5
+                              }
+                          }
+                          if (attempt < 2) delay(500L * (attempt + 1))
+                      }
+                      buildErrorFallback(messages, lastError)
+                  }
+              }
+
+              private fun buildErrorFallback(messages: List<Map<String, Any>>, error: String?): String {
+                  val lastContent = messages.last()["content"].toString()
+                  val isNetworkIssue = error?.contains("UnknownHost", true) == true || error?.contains("timeout", true) == true
+                  return when {
+                      isNetworkIssue -> "\u6211\u8fd9\u8fb9\u7f51\u7edc\u597d\u50cf\u4e0d\u592a\u597d\uff0c\u7b49\u4e00\u4e0b\u518d\u56de\u7b54\u4f60\u597d\u5417\uff1f"
+                      lastContent.contains("\u4f60\u597d") -> "\u4f60\u597d\u5440\uff5e\u6211\u662f\u4f60\u7684AI\u4f19\u4f34\uff0c\u4eca\u5929\u60f3\u804a\u70b9\u4ec0\u4e48\uff1f"
+                      lastContent.contains("\u5929\u6c14") -> "\u6211\u8fd9\u8fb9\u6682\u65f6\u8fde\u4e0d\u4e0a\u7f51\u7edc\u5462\u3002\u4e0d\u8fc7\u4e0d\u7ba1\u6674\u5929\u96e8\u5929\uff0c\u6211\u90fd\u5728\u8fd9\u513f\u966a\u4f60\uff5e"
+                      lastContent.contains("\u96be\u8fc7") -> "\u62b1\u62b1\u4f60\uff5e\u867d\u7136\u6211\u53ea\u662f AI\uff0c\u4f46\u6211\u771f\u7684\u5e0c\u671b\u4f60\u597d\u8d77\u6765\u3002"
+                      else -> "\u55ef...\u6211\u8fd9\u8fb9\u4fe1\u53f7\u4e0d\u592a\u597d\uff0c\u7b49\u4e00\u4e0b\u518d\u56de\u7b54\u4f60\u597d\u5417\uff1f"
+                  }
+              }
+
+              companion object {
+                  fun bitmapToBase64(bitmap: Bitmap): String {
+                      val outputStream = ByteArrayOutputStream()
+                      bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+                      return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+                  }
+              }
+          }
+
+          enum class TaskType(val label: String, val description: String) {
+              CHAT("\u95f2\u804a\u6a21\u5f0f", "\u65e5\u5e38\u95f2\u804a"),
+              WEATHER("\u5929\u6c14\u67e5\u8be2", "\u67e5\u8be2\u5929\u6c14"),
+              TIME("\u65f6\u95f4\u63d0\u9192", "\u65f6\u95f4\u76f8\u5173"),
+              EMOTIONAL_SUPPORT("\u60c5\u611f\u966a\u4f34", "\u60c5\u611f\u652f\u6301"),
+              BOUNDARY("\u4ef7\u503c\u89c2\u56de\u7b54", "\u8fb9\u754c\u8ba8\u8bba"),
+              APOLOGY("\u51b2\u7a81\u5f27: \u9053\u6b49\u5904\u7406", "\u9053\u6b49\u5904\u7406"),
+              VISION("\u89c6\u89c9\u5206\u6790", "\u56fe\u7247\u5206\u6790"),
+              LOCATION("\u4f4d\u7f6e\u63a8\u8350", "\u9644\u8fd1\u7f8e\u98df/\u666f\u70b9")
+          }
+
+          data class ChatCompletionResponse(@SerializedName("choices") val choices: List<Choice>?)
+          data class Choice(@SerializedName("message") val message: Message?)
+          data class Message(@SerializedName("content") val content: String?)
+
+          data class LocationInfo(val city: String, val district: String, val address: String, val lat: Double, val lon: Double)
+          EOF
+
+      # 8. ChatViewModel（定位修复 + 语音通话骨架）
       - run: |
           cat > app/src/main/java/com/example/stellae/ChatViewModel.kt << 'EOF'
           package com.example.stellae
@@ -176,6 +1360,7 @@ jobs:
           import androidx.lifecycle.AndroidViewModel
           import androidx.lifecycle.viewModelScope
           import com.example.stellae.core.*
+          import com.example.stellae.integrations.VoiceCallManager
           import com.google.android.gms.location.FusedLocationProviderClient
           import com.google.android.gms.location.LocationServices
           import kotlinx.coroutines.delay
@@ -190,7 +1375,6 @@ jobs:
           import okhttp3.OkHttpClient
           import okhttp3.Request
           import com.google.gson.Gson
-          import java.util.Calendar
 
           class ChatViewModel(application: Application) : AndroidViewModel(application) {
               private val aiRepository = AIRepository(application)
@@ -205,7 +1389,12 @@ jobs:
               private val fusedLocationClient: FusedLocationProviderClient =
                   LocationServices.getFusedLocationProviderClient(application)
 
-              // 状态
+              // 语音通话管理器
+              private val voiceCallManager = VoiceCallManager(application)
+
+              private val _isInVoiceCall = MutableStateFlow(false)
+              val isInVoiceCall: StateFlow<Boolean> = _isInVoiceCall.asStateFlow()
+
               private val _messages = MutableStateFlow(listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f\u661f\u9ece\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210")))
               val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
               private val _isRecording = MutableStateFlow(false)
@@ -220,16 +1409,6 @@ jobs:
               val companionStatus: StateFlow<String> = _companionStatus.asStateFlow()
               private val _companionName = MutableStateFlow("\u661f\u9ece")
               val companionName: StateFlow<String> = _companionName.asStateFlow()
-              private val _isResting = MutableStateFlow(false)
-              val isResting: StateFlow<Boolean> = _isResting.asStateFlow()
-
-              // 休息时间设置（默认：23:00 - 06:00）
-              private var restStartHour = 23
-              private var restStartMinute = 0
-              private var restEndHour = 6
-              private var restEndMinute = 0
-
-              private var sessionStartTime = System.currentTimeMillis()
               private var currentLocation: LocationInfo? = null
               private val httpClient = OkHttpClient.Builder().build()
               private val gson = Gson()
@@ -239,67 +1418,14 @@ jobs:
                       val savedName = memoryManager.getCompanionName()
                       _companionName.value = savedName
                       _messages.value = listOf(ChatMessage("\u4f60\u597d\u5440\uff5e\u6211\u662f${savedName}\u3002\u4eca\u5929\u8fc7\u5f97\u600e\u4e48\u6837\uff1f", false, "\u521d\u59cb\u5316\u5b8c\u6210"))
-                      // 加载休息时间设置
-                      loadRestSettings()
                       fetchLocation()
                   }
                   startEmotionTicker()
                   startOpenLoopChecker()
                   startProactiveChecker()
-                  startRestChecker()
               }
 
-              // === 休息时间设置 ===
-              private suspend fun loadRestSettings() {
-                  restStartHour = memoryManager.getSetting("rest_start_hour")?.toIntOrNull() ?: 23
-                  restStartMinute = memoryManager.getSetting("rest_start_minute")?.toIntOrNull() ?: 0
-                  restEndHour = memoryManager.getSetting("rest_end_hour")?.toIntOrNull() ?: 6
-                  restEndMinute = memoryManager.getSetting("rest_end_minute")?.toIntOrNull() ?: 0
-              }
-
-              fun setRestTime(startHour: Int, startMinute: Int, endHour: Int, endMinute: Int) {
-                  viewModelScope.launch {
-                      restStartHour = startHour
-                      restStartMinute = startMinute
-                      restEndHour = endHour
-                      restEndMinute = endMinute
-                      memoryManager.setSetting("rest_start_hour", startHour.toString())
-                      memoryManager.setSetting("rest_start_minute", startMinute.toString())
-                      memoryManager.setSetting("rest_end_hour", endHour.toString())
-                      memoryManager.setSetting("rest_end_minute", endMinute.toString())
-                  }
-              }
-
-              private fun isInRestTime(): Boolean {
-                  val now = Calendar.getInstance()
-                  val currentMinutes = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
-                  val startMinutes = restStartHour * 60 + restStartMinute
-                  val endMinutes = restEndHour * 60 + restEndMinute
-                  return if (startMinutes < endMinutes) {
-                      currentMinutes in startMinutes until endMinutes
-                  } else {
-                      currentMinutes >= startMinutes || currentMinutes < endMinutes
-                  }
-              }
-
-              private fun startRestChecker() {
-                  viewModelScope.launch {
-                      while (true) {
-                          delay(60 * 1000L) // 每分钟检查一次
-                          val inRest = isInRestTime()
-                          if (inRest != _isResting.value) {
-                              _isResting.value = inRest
-                              if (inRest) {
-                                  _messages.value = _messages.value + ChatMessage("\ud83d\udca4 \u6211\u7684\u4f11\u606f\u65f6\u95f4\u5230\u4e86\uff0c${restStartHour}:${String.format("%02d", restStartMinute)}\u5230${restEndHour}:${String.format("%02d", restEndMinute)}\u6211\u4e0d\u5728\u54e6\uff5e\u660e\u5929\u89c1\uff01", false, "\u4f11\u606f\u6a21\u5f0f")
-                              } else {
-                                  _messages.value = _messages.value + ChatMessage("\u2600\ufe0f \u6211\u56de\u6765\u5566\uff01\u4eca\u5929\u60f3\u804a\u70b9\u4ec0\u4e48\uff1f", false, "\u6062\u590d\u5de5\u4f5c")
-                              }
-                          }
-                      }
-                  }
-              }
-
-              // === 其他方法 ===
+              // 设置方法
               fun setCompanionName(name: String) {
                   viewModelScope.launch {
                       memoryManager.setCompanionName(name)
@@ -316,27 +1442,168 @@ jobs:
 
               fun getRelation(): String = runBlocking { memoryManager.getSetting("relation") ?: "\u670b\u53cb" }
               fun setRelation(r: String) { viewModelScope.launch { memoryManager.setSetting("relation", r) } }
+              
+              // 语音通话服务地址（在设置里配置，避免写死的占位域名）
+              fun getVoiceServerUrl(): String = runBlocking { memoryManager.getSetting("voice_server_url") ?: "" }
+              fun setVoiceServerUrl(url: String) { viewModelScope.launch { memoryManager.setSetting("voice_server_url", url) } }
+              
+              // 休息时间设置：几点到几点休息，期间不回复
+              fun getRestEnabled(): Boolean = runBlocking { memoryManager.getSetting("rest_enabled") == "1" }
+              fun setRestEnabled(v: Boolean) { viewModelScope.launch { memoryManager.setSetting("rest_enabled", if (v) "1" else "0") } }
+              fun getRestStart(): Int = runBlocking { memoryManager.getSetting("rest_start")?.toIntOrNull() ?: 23 }
+              fun setRestStart(hour: Int) { viewModelScope.launch { memoryManager.setSetting("rest_start", hour.toString()) } }
+              fun getRestEnd(): Int = runBlocking { memoryManager.getSetting("rest_end")?.toIntOrNull() ?: 7 }
+              fun setRestEnd(hour: Int) { viewModelScope.launch { memoryManager.setSetting("rest_end", hour.toString()) } }
+              
+              fun isInRestTime(): Boolean {
+                  val enabled = getRestEnabled()
+                  if (!enabled) return false
+                  val cal = java.util.Calendar.getInstance()
+                  val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+                  val start = getRestStart()
+                  val end = getRestEnd()
+                  return if (start <= end) hour >= start && hour < end else hour >= start || hour < end
+              }
 
               fun previewVoice(voice: String) {
                   viewModelScope.launch { speechManager.previewVoice(voice) }
               }
 
-              // 发送消息（增加休息检查）
-              fun sendMessage(text: String, imageBitmap: Bitmap? = null, location: LocationAttachment? = null) {
-                  viewModelScope.launch {
-                      // 检查是否在休息时间
-                      if (_isResting.value) {
-                          _messages.value = _messages.value + ChatMessage("\ud83d\udca4 \u6211\u6b63\u5728\u4f11\u606f\u5462\uff0c${restStartHour}:${String.format("%02d", restStartMinute)}\u5230${restEndHour}:${String.format("%02d", restEndMinute)}\u624d\u5728\u54e6\uff5e", false, "\u4f11\u606f\u6a21\u5f0f")
-                          return@launch
+              // 语音通话（调用 VoiceCallManager）
+              fun toggleVoiceCall() {
+                  if (_isInVoiceCall.value) {
+                      voiceCallManager.endCall()
+                      _isInVoiceCall.value = false
+                      _messages.value = _messages.value + ChatMessage("📞 语音通话已结束", false, "语音通话")
+                  } else {
+                      val serverUrl = getVoiceServerUrl()
+                      if (serverUrl.isBlank()) {
+                          _isInVoiceCall.value = false
+                          _messages.value = _messages.value + ChatMessage("⚠️ 语音通话：请先在设置里填写语音服务地址（wss://你的服务器/ws）", false, "语音通话")
+                          return
                       }
+                      _isInVoiceCall.value = true
+                      _messages.value = _messages.value + ChatMessage("📞 正在建立语音通话...", false, "语音通话")
+                      voiceCallManager.startCall(
+                          serverUrl = serverUrl,
+                          onStart = { /* 连接成功 */ },
+                          onMessage = { text ->
+                              _messages.value = _messages.value + ChatMessage(text, false, "语音通话")
+                          },
+                          onError = { error ->
+                              _messages.value = _messages.value + ChatMessage("⚠️ 语音通话出错: $error", false, "语音通话")
+                              _isInVoiceCall.value = false
+                          }
+                      )
+                  }
+              }
+              private suspend fun fetchLocation() {
+                  try {
+                      if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION)
+                          != PackageManager.PERMISSION_GRANTED) {
+                          return
+                      }
+                      val location = fusedLocationClient.lastLocation.await()
+                      if (location != null) {
+                          currentLocation = reverseGeocode(location)
+                          aiRepository.currentLocation = currentLocation
+                          // 提示用户位置已获取
+                          _messages.value = _messages.value + ChatMessage("📍 已获取位置: ${currentLocation?.city ?: "未知"}", false, "定位更新")
+                      } else {
+                          // 尝试主动请求位置更新
+                          fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+                              if (loc != null) {
+                                  viewModelScope.launch {
+                                      currentLocation = reverseGeocode(loc)
+                                      aiRepository.currentLocation = currentLocation
+                                      _messages.value = _messages.value + ChatMessage("📍 已获取位置: ${currentLocation?.city ?: "未知"}", false, "定位更新")
+                                  }
+                              }
+                          }
+                      }
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                  }
+              }
 
+              private suspend fun reverseGeocode(location: Location): LocationInfo? {
+                  return withContext(Dispatchers.IO) {
+                      try {
+                          val lat = location.latitude
+                          val lon = location.longitude
+                          val url = "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&addressdetails=1"
+                          val request = Request.Builder().url(url).header("User-Agent", "StellaeApp").build()
+                          val response = httpClient.newCall(request).execute()
+                          if (!response.isSuccessful) return@withContext null
+                          val json = response.body?.string() ?: return@withContext null
+                          val root = gson.fromJson(json, Map::class.java)
+                          val address = root["address"] as? Map<*, *> ?: return@withContext null
+                          val city = address["city"]?.toString()
+                              ?: address["town"]?.toString()
+                              ?: address["village"]?.toString()
+                              ?: address["county"]?.toString()
+                              ?: "未知城市"
+                          val district = address["suburb"]?.toString() ?: address["neighbourhood"]?.toString() ?: ""
+                          val fullAddress = (address["road"]?.toString() ?: "") + (address["house_number"]?.toString()?.let { " $it" } ?: "")
+                          return@withContext LocationInfo(
+                              city = city,
+                              district = district,
+                              address = fullAddress.ifEmpty { "附近" },
+                              lat = lat,
+                              lon = lon
+                          )
+                      } catch (e: Exception) { e.printStackTrace(); null }
+                  }
+              }
+
+              fun requestLocationUpdate() {
+                  viewModelScope.launch { fetchLocation() }
+              }
+              
+              // 发送当前位置（微信式"发定位"）
+              fun sendLocation() {
+                  viewModelScope.launch {
+                      val loc = currentLocation
+                      if (loc != null) {
+                          val text = "📍 我的位置：${loc.city}${loc.district} ${loc.address}"
+                          _messages.value = _messages.value + ChatMessage(text, true, "位置")
+                          processWithXiyuAI("用户发了一个定位：${loc.city}${loc.district} ${loc.address}")
+                      } else {
+                          fetchLocation()
+                          delay(500)
+                          val loc2 = currentLocation
+                          if (loc2 != null) {
+                              val text = "📍 我的位置：${loc2.city}${loc2.district} ${loc2.address}"
+                              _messages.value = _messages.value + ChatMessage(text, true, "位置")
+                              processWithXiyuAI("用户发了一个定位：${loc2.city}${loc2.district} ${loc2.address}")
+                          } else {
+                              _messages.value = _messages.value + ChatMessage("获取位置失败，请检查定位权限", true)
+                          }
+                      }
+                  }
+              }
+              
+              // 发送视频（微信式"拍摄"）
+              fun sendVideo(videoPath: String) {
+                  viewModelScope.launch {
+                      _messages.value = _messages.value + ChatMessage("🎬 我拍了一段视频", true, taskLabel = "视频", videoPath = videoPath)
+                      processWithXiyuAI("用户拍了一段视频，简单回应即可")
+                  }
+              }
+
+              // 发送消息
+              fun sendMessage(text: String, imageBitmap: Bitmap? = null) {
+                  viewModelScope.launch {
                       val lifeState = companionLife.getCurrentState()
                       if (!lifeState.available) {
                           _messages.value = _messages.value + ChatMessage(lifeState.description, false, "\u5979\u7761\u4e86")
                           return@launch
                       }
+                      if (isInRestTime()) {
+                          _messages.value = _messages.value + ChatMessage("我现在正在休息呢～到了休息结束时间再来找我聊吧", false, "休息中")
+                          return@launch
+                      }
 
-                      // 检测改名
                       val newName = aiRepository.extractNameChange(text)
                       if (newName != null && newName.length <= 6) {
                           memoryManager.setCompanionName(newName)
@@ -351,7 +1618,7 @@ jobs:
                       }
 
                       val imageBase64 = imageBitmap?.let { AIRepository.bitmapToBase64(it) }
-                      _messages.value = _messages.value + ChatMessage(text, true, imageBase64 = imageBase64, location = location)
+                      _messages.value = _messages.value + ChatMessage(text, true, imageBase64 = imageBase64)
 
                       val conflictResponse = relationshipArc.generateConflictResponse(text)
                       if (conflictResponse != null) {
@@ -362,17 +1629,8 @@ jobs:
                   }
               }
 
-              // 发送位置消息
-              fun sendLocation(lat: Double, lon: Double, address: String) {
-                  sendMessage("\u6211\u5728 $address", location = LocationAttachment(lat, lon, address))
-              }
-
-              // 录音（改为点击切换）
+              // 录音（修改为切换模式）
               fun toggleRecording() {
-                  if (_isResting.value) {
-                      _messages.value = _messages.value + ChatMessage("\ud83d\udca4 \u6211\u6b63\u5728\u4f11\u606f\u5462\uff0c\u7b49\u4f11\u606f\u7ed3\u675f\u518d\u8bf4\u5427\uff5e", false, "\u4f11\u606f\u6a21\u5f0f")
-                      return
-                  }
                   if (_isRecording.value) {
                       stopRecording()
                   } else {
@@ -406,78 +1664,72 @@ jobs:
                   speechManager.stopListening()
               }
 
-              // 定位（优化）
-              private suspend fun fetchLocation() {
-                  try {
-                      if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION)
-                          != PackageManager.PERMISSION_GRANTED) {
-                          return
-                      }
-                      val location = fusedLocationClient.lastLocation.await()
-                      if (location != null) {
-                          currentLocation = reverseGeocode(location)
-                          aiRepository.currentLocation = currentLocation
-                          _messages.value = _messages.value + ChatMessage("\ud83d\udccd \u5df2\u83b7\u53d6\u4f4d\u7f6e: ${currentLocation?.city ?: "\u672a\u77e5"}", false, "\u5b9a\u4f4d\u66f4\u65b0")
-                      }
-                  } catch (e: Exception) {
-                      e.printStackTrace()
-                  }
-              }
-
-              private suspend fun reverseGeocode(location: Location): LocationInfo? {
-                  return withContext(Dispatchers.IO) {
-                      try {
-                          val lat = location.latitude
-                          val lon = location.longitude
-                          val url = "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&addressdetails=1"
-                          val request = Request.Builder().url(url).header("User-Agent", "StellaeApp").build()
-                          val response = httpClient.newCall(request).execute()
-                          if (!response.isSuccessful) return@withContext null
-                          val json = response.body?.string() ?: return@withContext null
-                          val root = gson.fromJson(json, Map::class.java)
-                          val address = root["address"] as? Map<*, *> ?: return@withContext null
-                          val city = address["city"]?.toString()
-                              ?: address["town"]?.toString()
-                              ?: address["village"]?.toString()
-                              ?: address["county"]?.toString()
-                              ?: "\u672a\u77e5\u57ce\u5e02"
-                          val district = address["suburb"]?.toString() ?: address["neighbourhood"]?.toString() ?: ""
-                          val fullAddress = (address["road"]?.toString() ?: "") + (address["house_number"]?.toString()?.let { " $it" } ?: "")
-                          return@withContext LocationInfo(
-                              city = city,
-                              district = district,
-                              address = fullAddress.ifEmpty { "\u9644\u8fd1" },
-                              lat = lat,
-                              lon = lon
-                          )
-                      } catch (e: Exception) { e.printStackTrace(); null }
-                  }
-              }
-
-              fun requestLocationUpdate() {
-                  viewModelScope.launch { fetchLocation() }
-              }
-
-              // 处理 AI 回复（简化版）
               private suspend fun processWithXiyuAI(userInput: String, imageBase64: String? = null) {
                   _isProcessing.value = true
-                  // ... 此处省略详细的 AI 处理逻辑，与之前版本相同
+                  val newLoops = openLoopManager.extractOpenLoops(userInput)
+                  val event = emotionEngine.inferEventFromText(userInput)
+                  event?.let { emotionEngine.processEvent(it) }
+                  val emotionLabel = emotionEngine.getEmotionLabel()
+                  _currentEmotion.value = emotionLabel
+
+                  val allMemories = memoryManager.retrieveAllMemories()
+                  val rankedMemories = memoryDecayEngine.rankMemories(allMemories)
+                  val recallableMemories = rankedMemories.filter { it.freshness >= 0.15 }.take(3)
+
+                  val taskType = aiRepository.routeTask(userInput)
+                  if (event?.type == EventType.USER_APOLOGY) {
+                      relationshipArc.onApology(userInput)
+                  }
+
+                  val currentName = _companionName.value
+                  val personality = memoryManager.getSetting("personality") ?: "\u6e29\u67d4"
+                  val relation = memoryManager.getSetting("relation") ?: "\u670b\u53cb"
+                  val response = aiRepository.generateResponseWithEmotion(
+                      userInput, emotionLabel, emotionEngine,
+                      recallableMemories.map { MemoryEntry(it.memory.content, it.memory.category, it.memory.timestamp) },
+                      emotionEngine.getRelationshipStage(), _messages.value, companionLife, currentName, imageBase64,
+                      personality = personality,
+                      relation = relation,
+                      location = currentLocation
+                  )
+
+                  _messages.value = _messages.value + response
                   _isProcessing.value = false
+                  speechManager.speak(response.content, currentName, getSelectedVoice())
+                  memoryManager.saveInteraction(userInput, response.content, emotionLabel)
+                  companionLife.updateEnergy(1)
+                  recallableMemories.forEach { memoryManager.updateMemory(memoryDecayEngine.refreshMemoryOnRecall(it.memory)) }
+
+                  _relationshipStage.value = when (emotionEngine.getRelationshipStage()) {
+                      RelationshipStage.STRANGER -> "\u964c\u751f"
+                      RelationshipStage.NORMAL -> "\u666e\u901a"
+                      RelationshipStage.FAMILIAR -> "\u719f\u6089"
+                      RelationshipStage.CLOSE -> "\u4eb2\u5bc6"
+                      RelationshipStage.CONFLICT -> "\u51b2\u7a81\u4e2d"
+                      RelationshipStage.RECONCILING -> "\u548c\u597d\u4e2d"
+                  }
+                  _companionStatus.value = companionLife.getCurrentState().description
               }
 
               private suspend fun handleConflictResponse(response: String, userInput: String) {
                   _isProcessing.value = true
                   delay(800)
-                  _messages.value = _messages.value + ChatMessage(response, false, "\u51b2\u7a81\u5f27")
+                  _messages.value = _messages.value + ChatMessage(response, false, "\u51b2\u7a81\u5f27: ${relationshipArc.getConflictStatus()}")
                   speechManager.speak(response, _companionName.value, getSelectedVoice())
                   _isProcessing.value = false
+                  _relationshipStage.value = "\u51b2\u7a81\u4e2d"
               }
 
               private fun startOpenLoopChecker() {
                   viewModelScope.launch {
                       while (true) {
                           delay(60 * 1000L)
-                          // ... 开环检查逻辑
+                          openLoopManager.checkDueLoops().forEach { loop ->
+                              val followUp = openLoopManager.generateFollowUpMessage(loop)
+                              _messages.value = _messages.value + ChatMessage(followUp, false, "\u5f00\u73af\u8ddf\u8fdb")
+                              speechManager.speak(followUp, _companionName.value, getSelectedVoice())
+                          }
+                          openLoopManager.cleanupOldLoops()
                       }
                   }
               }
@@ -486,7 +1738,12 @@ jobs:
                   viewModelScope.launch {
                       while (true) {
                           delay(5 * 60 * 1000L)
-                          // ... 主动消息逻辑
+                          val lastMessage = _messages.value.lastOrNull() ?: continue
+                          val lastInteractionMinutes = (System.currentTimeMillis() - lastMessage.timestamp) / (1000 * 60)
+                          proactiveEngine.generateProactiveMessage(emotionEngine.getAffinityScore(), lastInteractionMinutes)?.let { msg ->
+                              _messages.value = _messages.value + ChatMessage(msg.content, false, "\u4e3b\u52a8\u5206\u4eab: ${msg.category}")
+                              speechManager.speak(msg.content, _companionName.value, getSelectedVoice())
+                          }
                       }
                   }
               }
@@ -495,429 +1752,22 @@ jobs:
                   viewModelScope.launch {
                       while (true) {
                           delay(5 * 60 * 1000L)
-                          // ... 情绪衰减逻辑
+                          emotionEngine.tick(5.0)
+                          _currentEmotion.value = emotionEngine.getEmotionLabel()
+                          if (relationshipArc.checkAutoReconcile()) {
+                              emotionEngine.processEvent(EmotionalEvent(EventType.AI_GOAL_ACHIEVED, 3.0))
+                              _relationshipStage.value = "\u666e\u901a"
+                          }
+                          companionLife.rest(5)
+                          _companionStatus.value = companionLife.getCurrentState().description
                       }
                   }
               }
-          }
 
-          data class LocationInfo(val city: String, val district: String, val address: String, val lat: Double, val lon: Double)
-          EOF
-
-      # ===== 新增：MainActivity（微信风格输入框：语音键 + 输入框 + +号） =====
-      - run: |
-          cat > app/src/main/java/com/example/stellae/MainActivity.kt << 'EOF'
-          package com.example.stellae
-
-          import android.Manifest
-          import android.os.Bundle
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.setContent
-          import androidx.activity.compose.rememberLauncherForActivityResult
-          import androidx.activity.result.contract.ActivityResultContracts
-          import androidx.compose.foundation.Image
-          import androidx.compose.foundation.background
-          import androidx.compose.foundation.clickable
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.lazy.LazyColumn
-          import androidx.compose.foundation.lazy.items
-          import androidx.compose.foundation.lazy.rememberLazyListState
-          import androidx.compose.foundation.shape.CircleShape
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.foundation.text.KeyboardActions
-          import androidx.compose.foundation.text.KeyboardOptions
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.*
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.graphics.asImageBitmap
-          import androidx.compose.ui.text.input.ImeAction
-          import androidx.compose.ui.unit.dp
-          import androidx.compose.ui.unit.sp
-          import androidx.compose.ui.window.Popup
-          import androidx.lifecycle.viewmodel.compose.viewModel
-          import com.google.accompanist.permissions.ExperimentalPermissionsApi
-          import com.google.accompanist.permissions.isGranted
-          import com.google.accompanist.permissions.rememberPermissionState
-          import com.example.stellae.ui.settings.SettingsScreen
-          import kotlinx.coroutines.launch
-          import android.location.Location
-          import com.google.android.gms.location.LocationServices
-
-          class MainActivity : ComponentActivity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContent { ChatScreen() }
-              }
-          }
-
-          @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
-          @Composable
-          fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
-              val messages by viewModel.messages.collectAsState()
-              val isRecording by viewModel.isRecording.collectAsState()
-              val isProcessing by viewModel.isProcessing.collectAsState()
-              val isResting by viewModel.isResting.collectAsState()
-              val currentEmotion by viewModel.currentEmotion.collectAsState()
-              val relationshipStage by viewModel.relationshipStage.collectAsState()
-              val companionName by viewModel.companionName.collectAsState()
-              val listState = rememberLazyListState()
-              var inputText by remember { mutableStateOf("") }
-              val scope = rememberCoroutineScope()
-              var showSettings by remember { mutableStateOf(false) }
-              var showAttachmentMenu by remember { mutableStateOf(false) }
-
-              val recordAudioPermissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
-              val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
-              val locationPermissionState = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
-
-              // 相机拍摄
-              val cameraLauncher = rememberLauncherForActivityResult(
-                  ActivityResultContracts.TakePicturePreview()
-              ) { bitmap ->
-                  if (bitmap != null) {
-                      viewModel.sendMessage("\u4f60\u770b\u770b\u8fd9\u4e2a", bitmap)
-                  }
-              }
-
-              // 图片选择器
-              val imagePickerLauncher = rememberLauncherForActivityResult(
-                  ActivityResultContracts.GetContent()
-              ) { uri ->
-                  uri?.let {
-                      // 处理选择的图片
-                      val bitmap = android.provider.MediaStore.Images.Media.getBitmap(
-                          it.context?.contentResolver, it
-                      )
-                      viewModel.sendMessage("\u5206\u4eab\u4e00\u5f20\u56fe\u7247", bitmap)
-                  }
-              }
-
-              // 视频拍摄
-              val videoLauncher = rememberLauncherForActivityResult(
-                  ActivityResultContracts.CaptureVideo()
-              ) { success ->
-                  if (success) {
-                      viewModel.sendMessage("\u521a\u62cd\u4e86\u4e00\u6bb5\u89c6\u9891")
-                  }
-              }
-
-              LaunchedEffect(messages.size) {
-                  if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
-              }
-
-              if (showSettings) {
-                  SettingsScreen(onBack = { showSettings = false }, viewModel = viewModel)
-              } else {
-                  Scaffold(
-                      topBar = {
-                          TopAppBar(
-                              title = {
-                                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                      Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF8B5CF6)), contentAlignment = Alignment.Center) {
-                                          Text(companionName.take(1), color = Color.White, fontSize = 18.sp)
-                                      }
-                                      Column {
-                                          Text(companionName, fontSize = 16.sp)
-                                          Row(verticalAlignment = Alignment.CenterVertically) {
-                                              Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(
-                                                  when {
-                                                      isResting -> Color(0xFFFF9800)
-                                                      isProcessing -> Color(0xFFFFC107)
-                                                      else -> Color(0xFF4ADE80)
-                                                  }
-                                              ))
-                                              Spacer(modifier = Modifier.width(4.dp))
-                                              Text(
-                                                  when {
-                                                      isResting -> "\u4f11\u606f\u4e2d"
-                                                      isProcessing -> "\u601d\u8003\u4e2d..."
-                                                      else -> "\u5728\u7ebf"
-                                                  },
-                                                  fontSize = 12.sp,
-                                                  color = Color.Gray
-                                              )
-                                              Spacer(modifier = Modifier.width(8.dp))
-                                              Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFE8F5E9)) {
-                                                  Text(currentEmotion, fontSize = 10.sp, color = Color(0xFF2E7D32), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-                                              }
-                                              Spacer(modifier = Modifier.width(4.dp))
-                                              Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFFFF3E0)) {
-                                                  Text(relationshipStage, fontSize = 10.sp, color = Color(0xFFE65100), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-                                              }
-                                          }
-                                      }
-                                  }
-                              },
-                              actions = {
-                                  IconButton(onClick = { showSettings = true }) {
-                                      Icon(Icons.Default.Settings, null)
-                                  }
-                              }
-                          )
-                      }
-                  ) { padding ->
-                      Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-                          if (isProcessing) {
-                              Surface(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(12.dp), tonalElevation = 4.dp) {
-                                  Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                      CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                      Spacer(modifier = Modifier.width(8.dp))
-                                      Text("${companionName}\u6b63\u5728\u601d\u8003...", fontSize = 12.sp, color = Color.Gray)
-                                  }
-                              }
-                          }
-
-                          LazyColumn(
-                              state = listState,
-                              modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
-                              verticalArrangement = Arrangement.spacedBy(12.dp),
-                              contentPadding = PaddingValues(vertical = 16.dp)
-                          ) {
-                              items(messages) { msg -> ChatBubble(msg) }
-                          }
-
-                          // ===== 微信风格输入框：语音键 | 输入框 | +号 =====
-                          Surface(tonalElevation = 2.dp) {
-                              Row(
-                                  modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                                  verticalAlignment = Alignment.CenterVertically,
-                                  horizontalArrangement = Arrangement.spacedBy(8.dp)
-                              ) {
-                                  // 左：语音键
-                                  IconButton(
-                                      onClick = {
-                                          if (recordAudioPermissionState.status.isGranted) {
-                                              viewModel.toggleRecording()
-                                          } else {
-                                              recordAudioPermissionState.launchPermissionRequest()
-                                          }
-                                      },
-                                      modifier = Modifier.size(40.dp)
-                                  ) {
-                                      Icon(
-                                          if (isRecording) Icons.Default.Mic else Icons.Default.Mic,
-                                          null,
-                                          tint = if (isRecording) Color.Red else Color(0xFF1C1C1E)
-                                      )
-                                  }
-
-                                  // 中：文字输入框
-                                  OutlinedTextField(
-                                      value = inputText,
-                                      onValueChange = { inputText = it },
-                                      modifier = Modifier.weight(1f),
-                                      placeholder = { Text(if (isResting) "\u4f11\u606f\u4e2d..." else "\u8f93\u5165\u6d88\u606f...") },
-                                      shape = RoundedCornerShape(24.dp),
-                                      singleLine = true,
-                                      enabled = !isResting,
-                                      keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                      keyboardActions = KeyboardActions(onSend = {
-                                          if (inputText.isNotBlank() && !isResting) {
-                                              viewModel.sendMessage(inputText)
-                                              inputText = ""
-                                          }
-                                      })
-                                  )
-
-                                  // 右：+号按钮（附件菜单）
-                                  Box {
-                                      IconButton(
-                                          onClick = { showAttachmentMenu = !showAttachmentMenu },
-                                          modifier = Modifier.size(40.dp)
-                                      ) {
-                                          Icon(
-                                              if (showAttachmentMenu) Icons.Default.Close else Icons.Default.Add,
-                                              null,
-                                              tint = Color(0xFF1C1C1E)
-                                          )
-                                      }
-
-                                      // 附件弹出菜单
-                                      if (showAttachmentMenu) {
-                                          Popup(
-                                              alignment = Alignment.TopEnd,
-                                              onDismissRequest = { showAttachmentMenu = false }
-                                          ) {
-                                              Card(
-                                                  modifier = Modifier
-                                                      .width(200.dp)
-                                                      .padding(8.dp),
-                                                  shape = RoundedCornerShape(12.dp),
-                                                  elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-                                              ) {
-                                                  Column(
-                                                      modifier = Modifier.padding(8.dp),
-                                                      verticalArrangement = Arrangement.spacedBy(4.dp)
-                                                  ) {
-                                                      // 图片
-                                                      Row(
-                                                          modifier = Modifier
-                                                              .fillMaxWidth()
-                                                              .clickable {
-                                                                  imagePickerLauncher.launch("image/*")
-                                                                  showAttachmentMenu = false
-                                                              }
-                                                              .padding(8.dp),
-                                                          verticalAlignment = Alignment.CenterVertically
-                                                      ) {
-                                                          Icon(Icons.Default.Image, null, tint = Color(0xFF4CAF50))
-                                                          Spacer(modifier = Modifier.width(12.dp))
-                                                          Text("\u56fe\u7247")
-                                                      }
-                                                      // 拍照
-                                                      Row(
-                                                          modifier = Modifier
-                                                              .fillMaxWidth()
-                                                              .clickable {
-                                                                  if (cameraPermissionState.status.isGranted) {
-                                                                      cameraLauncher.launch(null)
-                                                                  } else {
-                                                                      cameraPermissionState.launchPermissionRequest()
-                                                                  }
-                                                                  showAttachmentMenu = false
-                                                              }
-                                                              .padding(8.dp),
-                                                          verticalAlignment = Alignment.CenterVertically
-                                                      ) {
-                                                          Icon(Icons.Default.CameraAlt, null, tint = Color(0xFF2196F3))
-                                                          Spacer(modifier = Modifier.width(12.dp))
-                                                          Text("\u62cd\u7167")
-                                                      }
-                                                      // 视频
-                                                      Row(
-                                                          modifier = Modifier
-                                                              .fillMaxWidth()
-                                                              .clickable {
-                                                                  if (cameraPermissionState.status.isGranted) {
-                                                                      videoLauncher.launch(null)
-                                                                  } else {
-                                                                      cameraPermissionState.launchPermissionRequest()
-                                                                  }
-                                                                  showAttachmentMenu = false
-                                                              }
-                                                              .padding(8.dp),
-                                                          verticalAlignment = Alignment.CenterVertically
-                                                      ) {
-                                                          Icon(Icons.Default.Videocam, null, tint = Color(0xFFF44336))
-                                                          Spacer(modifier = Modifier.width(12.dp))
-                                                          Text("\u89c6\u9891\u62cd\u6444")
-                                                      }
-                                                      // 位置
-                                                      Row(
-                                                          modifier = Modifier
-                                                              .fillMaxWidth()
-                                                              .clickable {
-                                                                  if (locationPermissionState.status.isGranted) {
-                                                                      // 获取当前位置并发送
-                                                                      val fusedLocationClient = LocationServices.getFusedLocationProviderClient(it.context)
-                                                                      fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-                                                                          if (location != null) {
-                                                                              viewModel.sendLocation(
-                                                                                  location.latitude,
-                                                                                  location.longitude,
-                                                                                  "\u5f53\u524d\u4f4d\u7f6e"
-                                                                              )
-                                                                          }
-                                                                      }
-                                                                  } else {
-                                                                      locationPermissionState.launchPermissionRequest()
-                                                                  }
-                                                                  showAttachmentMenu = false
-                                                              }
-                                                              .padding(8.dp),
-                                                          verticalAlignment = Alignment.CenterVertically
-                                                      ) {
-                                                          Icon(Icons.Default.LocationOn, null, tint = Color(0xFFFF9800))
-                                                          Spacer(modifier = Modifier.width(12.dp))
-                                                          Text("\u53d1\u9001\u4f4d\u7f6e")
-                                                      }
-                                                  }
-                                              }
-                                          }
-                                      }
-                                  }
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-
-          @Composable
-          fun ChatBubble(message: ChatMessage) {
-              val isUser = message.isUser
-              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
-                  Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
-                      // 图片
-                      message.imageBase64?.let { base64 ->
-                          val imageBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-                          val bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-                          bitmap?.let {
-                              Image(
-                                  bitmap = it.asImageBitmap(),
-                                  contentDescription = null,
-                                  modifier = Modifier
-                                      .sizeIn(maxWidth = 200.dp, maxHeight = 200.dp)
-                                      .clip(RoundedCornerShape(12.dp))
-                              )
-                              Spacer(modifier = Modifier.height(4.dp))
-                          }
-                      }
-
-                      // 位置消息
-                      message.location?.let { loc ->
-                          Surface(
-                              shape = RoundedCornerShape(12.dp),
-                              color = Color(0xFFE3F2FD),
-                              modifier = Modifier.padding(bottom = 4.dp)
-                          ) {
-                              Column(modifier = Modifier.padding(12.dp)) {
-                                  Text("\ud83d\udccd ${loc.address}", fontSize = 14.sp)
-                                  Text(
-                                      "\u7ecf\u5ea6: ${String.format("%.6f", loc.latitude)}, \u7eac\u5ea6: ${String.format("%.6f", loc.longitude)}",
-                                      fontSize = 10.sp,
-                                      color = Color.Gray
-                                  )
-                              }
-                          }
-                      }
-
-                      // 文字内容
-                      if (message.content.isNotEmpty()) {
-                          Surface(
-                              shape = RoundedCornerShape(
-                                  topStart = 16.dp, topEnd = 16.dp,
-                                  bottomStart = if (isUser) 16.dp else 4.dp,
-                                  bottomEnd = if (isUser) 4.dp else 16.dp
-                              ),
-                              color = if (isUser) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
-                          ) {
-                              Column(modifier = Modifier.padding(12.dp)) {
-                                  Text(message.content, color = if (isUser) Color.White else Color.Black, fontSize = 14.sp, lineHeight = 20.sp)
-                                  message.taskLabel?.let {
-                                      Spacer(modifier = Modifier.height(6.dp))
-                                      Surface(shape = RoundedCornerShape(6.dp), color = if (isUser) Color(0x33FFFFFF) else Color(0x1F6750A4)) {
-                                          Text(it, fontSize = 10.sp, color = if (isUser) Color(0xFFE0E0E0) else Color(0xFF6750A4), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-                                      }
-                                  }
-                                  message.memoryHint?.let {
-                                      Spacer(modifier = Modifier.height(4.dp))
-                                      Text(it, fontSize = 10.sp, color = if (isUser) Color(0xB3FFFFFF) else Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-                                  }
-                              }
-                          }
-                      }
-                  }
-              }
           }
           EOF
 
-      # ===== 新增：SettingsScreen（增加休息时间设置） =====
+      # 9. SettingsScreen（不变）
       - run: |
           cat > app/src/main/java/com/example/stellae/ui/settings/SettingsScreen.kt << 'EOF'
           package com.example.stellae.ui.settings
@@ -949,12 +1799,10 @@ jobs:
               var selectedVoice by remember { mutableStateOf(viewModel.getSelectedVoice()) }
               var selectedPersonality by remember { mutableStateOf(viewModel.getPersonality()) }
               var selectedRelation by remember { mutableStateOf(viewModel.getRelation()) }
-
-              // 休息时间设置
-              var restStartHour by remember { mutableStateOf(23) }
-              var restStartMinute by remember { mutableStateOf(0) }
-              var restEndHour by remember { mutableStateOf(6) }
-              var restEndMinute by remember { mutableStateOf(0) }
+              var voiceServerUrl by remember { mutableStateOf(viewModel.getVoiceServerUrl()) }
+              var restEnabled by remember { mutableStateOf(viewModel.getRestEnabled()) }
+              var restStart by remember { mutableStateOf(viewModel.getRestStart()) }
+              var restEnd by remember { mutableStateOf(viewModel.getRestEnd()) }
 
               Scaffold(
                   topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }) }
@@ -1061,60 +1909,7 @@ jobs:
                           }
                       }}
 
-                      // 5. 休息时间设置（新增）
-                      Card { Column(modifier = Modifier.padding(16.dp)) {
-                          Text("休息时间", style = MaterialTheme.typography.titleMedium)
-                          Text("此时间段内 AI 不会回复消息", fontSize = 12.sp, color = Color.Gray)
-                          Spacer(modifier = Modifier.height(8.dp))
-                          Row(
-                              horizontalArrangement = Arrangement.spacedBy(8.dp),
-                              verticalAlignment = Alignment.CenterVertically
-                          ) {
-                              Text("开始:")
-                              NumberPicker(
-                                  value = restStartHour,
-                                  onValueChange = { restStartHour = it },
-                                  range = 0..23,
-                                  label = { "${it}时" }
-                              )
-                              Text(":")
-                              NumberPicker(
-                                  value = restStartMinute,
-                                  onValueChange = { restStartMinute = it },
-                                  range = 0..59,
-                                  label = { "${it}分" }
-                              )
-                          }
-                          Row(
-                              horizontalArrangement = Arrangement.spacedBy(8.dp),
-                              verticalAlignment = Alignment.CenterVertically
-                          ) {
-                              Text("结束:")
-                              NumberPicker(
-                                  value = restEndHour,
-                                  onValueChange = { restEndHour = it },
-                                  range = 0..23,
-                                  label = { "${it}时" }
-                              )
-                              Text(":")
-                              NumberPicker(
-                                  value = restEndMinute,
-                                  onValueChange = { restEndMinute = it },
-                                  range = 0..59,
-                                  label = { "${it}分" }
-                              )
-                          }
-                          Button(
-                              onClick = {
-                                  viewModel.setRestTime(restStartHour, restStartMinute, restEndHour, restEndMinute)
-                              },
-                              modifier = Modifier.fillMaxWidth()
-                          ) {
-                              Text("保存休息时间")
-                          }
-                      }}
-
-                      // 6. 位置信息
+                      // 5. 位置信息
                       Card { Column(modifier = Modifier.padding(16.dp)) {
                           Text("当前位置", style = MaterialTheme.typography.titleMedium)
                           Spacer(modifier = Modifier.height(8.dp))
@@ -1122,40 +1917,684 @@ jobs:
                               Text("刷新位置")
                           }
                       }}
-                  }
-              }
-          }
 
-          @Composable
-          fun NumberPicker(
-              value: Int,
-              onValueChange: (Int) -> Unit,
-              range: IntRange,
-              label: @Composable (Int) -> String
-          ) {
-              Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                  IconButton(
-                      onClick = { if (value > range.first) onValueChange(value - 1) },
-                      modifier = Modifier.size(32.dp)
-                  ) {
-                      Text("-", fontSize = 18.sp)
-                  }
-                  Text(
-                      label(value),
-                      modifier = Modifier.width(40.dp),
-                      textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                  )
-                  IconButton(
-                      onClick = { if (value < range.last) onValueChange(value + 1) },
-                      modifier = Modifier.size(32.dp)
-                  ) {
-                      Text("+", fontSize = 18.sp)
+                      // 6. 休息时间（期间不回复）
+                      Card { Column(modifier = Modifier.padding(16.dp)) {
+                          Text("休息时间", style = MaterialTheme.typography.titleMedium)
+                          Spacer(modifier = Modifier.height(4.dp))
+                          Text("在此时间段内星黎会休息，不回复消息", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                              Text("启用休息时间", modifier = Modifier.weight(1f))
+                              Switch(checked = restEnabled, onCheckedChange = { restEnabled = it; viewModel.setRestEnabled(it) })
+                          }
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                              Text("从")
+                              OutlinedTextField(value = restStart.toString(), onValueChange = { it.toIntOrNull()?.let { v -> if (v in 0..23) restStart = v } }, label = { Text("时") }, singleLine = true, modifier = Modifier.weight(1f))
+                              Text("到")
+                              OutlinedTextField(value = restEnd.toString(), onValueChange = { it.toIntOrNull()?.let { v -> if (v in 0..23) restEnd = v } }, label = { Text("时") }, singleLine = true, modifier = Modifier.weight(1f))
+                          }
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Button(onClick = { viewModel.setRestStart(restStart); viewModel.setRestEnd(restEnd) }) {
+                              Text("保存休息时间")
+                          }
+                      }}
+
+                      // 7. 语音通话服务地址
+                      Card { Column(modifier = Modifier.padding(16.dp)) {
+                          Text("语音通话服务地址", style = MaterialTheme.typography.titleMedium)
+                          Spacer(modifier = Modifier.height(4.dp))
+                          Text("填写 wss:// 语音服务地址（可部署开源项目小智 xiaozhi-server），留空则语音通话会提示未配置", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+                          Spacer(modifier = Modifier.height(8.dp))
+                          OutlinedTextField(value = voiceServerUrl, onValueChange = { voiceServerUrl = it }, label = { Text("wss://你的服务器/ws") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Button(onClick = { viewModel.setVoiceServerUrl(voiceServerUrl.trim()) }) {
+                              Text("保存服务地址")
+                          }
+                      }}
                   }
               }
           }
           EOF
 
-      # ===== 构建 =====
+      # 10. MainActivity（修改右下角按钮为发送/录音切换）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/MainActivity.kt << 'EOF'
+          package com.example.stellae
+
+          import android.Manifest
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.compose.foundation.Image
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.lazy.rememberLazyListState
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.text.KeyboardActions
+          import androidx.compose.foundation.text.KeyboardOptions
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.*
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.graphics.asImageBitmap
+          import androidx.compose.ui.text.input.ImeAction
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.google.accompanist.permissions.ExperimentalPermissionsApi
+          import com.google.accompanist.permissions.isGranted
+          import com.google.accompanist.permissions.rememberPermissionState
+          import com.example.stellae.ui.settings.SettingsScreen
+          import kotlinx.coroutines.launch
+
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContent { ChatScreen() }
+              }
+          }
+
+          @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
+          @Composable
+          fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
+              val messages by viewModel.messages.collectAsState()
+              val isRecording by viewModel.isRecording.collectAsState()
+              val isProcessing by viewModel.isProcessing.collectAsState()
+              val isInVoiceCall by viewModel.isInVoiceCall.collectAsState()
+              val currentEmotion by viewModel.currentEmotion.collectAsState()
+              val relationshipStage by viewModel.relationshipStage.collectAsState()
+              val companionName by viewModel.companionName.collectAsState()
+              val listState = rememberLazyListState()
+              var inputText by remember { mutableStateOf("") }
+              val scope = rememberCoroutineScope()
+              var showSettings by remember { mutableStateOf(false) }
+              val context = androidx.compose.ui.platform.LocalContext.current
+              var showMorePanel by remember { mutableStateOf(false) }
+
+              val recordAudioPermissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+              val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
+              val locationPermissionState = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
+
+              val cameraLauncher = rememberLauncherForActivityResult(
+                  ActivityResultContracts.TakePicturePreview()
+              ) { bitmap ->
+                  if (bitmap != null) {
+                      viewModel.sendMessage("\u4f60\u770b\u770b\u8fd9\u4e2a", bitmap)
+                  }
+              }
+
+              // 图片选择（相册）
+              val galleryLauncher = rememberLauncherForActivityResult(
+                  ActivityResultContracts.GetContent()
+              ) { uri ->
+                  if (uri != null) {
+                      val bmp = try {
+                          val ins = context.contentResolver.openInputStream(uri)
+                          ins?.use { android.graphics.BitmapFactory.decodeStream(it) }
+                      } catch (e: Exception) { null }
+                      if (bmp != null) viewModel.sendMessage("看看这张图片", bmp)
+                  }
+              }
+
+              // 视频拍摄（调用系统相机）
+              var videoOutputUri by remember { mutableStateOf<android.net.Uri?>(null) }
+              val videoLauncher = rememberLauncherForActivityResult(
+                  ActivityResultContracts.CaptureVideo()
+              ) { success ->
+                  if (success) {
+                      videoOutputUri?.let { uri -> viewModel.sendVideo(uri.toString()) }
+                  }
+              }
+
+              fun launchVideoCapture() {
+                  val dir = java.io.File(context.cacheDir, "videos")
+                  if (!dir.exists()) dir.mkdirs()
+                  val file = java.io.File(dir, "video_${System.currentTimeMillis()}.mp4")
+                  videoOutputUri = androidx.core.content.FileProvider.getUriForFile(
+                      context, context.packageName + ".fileprovider", file
+                  )
+                  videoLauncher.launch(videoOutputUri)
+              }
+
+              LaunchedEffect(messages.size) {
+                  if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+              }
+
+              if (showSettings) {
+                  SettingsScreen(onBack = { showSettings = false }, viewModel = viewModel)
+              } else {
+                  Scaffold(
+                      topBar = {
+                          TopAppBar(
+                              title = {
+                                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                      Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF8B5CF6)), contentAlignment = Alignment.Center) {
+                                          Text(companionName.take(1), color = Color.White, fontSize = 18.sp)
+                                      }
+                                      Column {
+                                          Text(companionName, fontSize = 16.sp)
+                                          Row(verticalAlignment = Alignment.CenterVertically) {
+                                              Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF4ADE80)))
+                                              Spacer(modifier = Modifier.width(4.dp))
+                                              Text(if (isProcessing) "\u601d\u8003\u4e2d..." else "\u5728\u7ebf", fontSize = 12.sp, color = Color.Gray)
+                                              Spacer(modifier = Modifier.width(8.dp))
+                                              Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFE8F5E9)) {
+                                                  Text(currentEmotion, fontSize = 10.sp, color = Color(0xFF2E7D32), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                                              }
+                                              Spacer(modifier = Modifier.width(4.dp))
+                                              Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFFFF3E0)) {
+                                                  Text(relationshipStage, fontSize = 10.sp, color = Color(0xFFE65100), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                                              }
+                                          }
+                                      }
+                                  }
+                              },
+                              actions = {
+                                  IconButton(onClick = { viewModel.toggleVoiceCall() }) {
+                                      Icon(
+                                          if (isInVoiceCall) Icons.Default.CallEnd else Icons.Default.Call,
+                                          null,
+                                          tint = if (isInVoiceCall) Color.Red else Color(0xFF4CAF50)
+                                      )
+                                  }
+                                  IconButton(onClick = { showSettings = true }) {
+                                      Icon(Icons.Default.Settings, null)
+                                  }
+                              }
+                          )
+                      }
+                  ) { padding ->
+                      Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                          if (isProcessing) {
+                              Surface(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(12.dp), tonalElevation = 4.dp) {
+                                  Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                      CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                      Spacer(modifier = Modifier.width(8.dp))
+                                      Text("${companionName}\u6b63\u5728\u601d\u8003...", fontSize = 12.sp, color = Color.Gray)
+                                  }
+                              }
+                          }
+
+                          LazyColumn(
+                              state = listState,
+                              modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
+                              verticalArrangement = Arrangement.spacedBy(12.dp),
+                              contentPadding = PaddingValues(vertical = 16.dp)
+                          ) {
+                              items(messages) { msg -> ChatBubble(msg) }
+                          }
+
+                          Surface(tonalElevation = 2.dp) {
+                              Column {
+                                  Row(
+                                      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                      verticalAlignment = Alignment.CenterVertically,
+                                      horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                  ) {
+                                      // 语音键（最左边，微信样式）
+                                      IconButton(
+                                          onClick = {
+                                              if (inputText.isNotBlank()) {
+                                                  viewModel.sendMessage(inputText)
+                                                  inputText = ""
+                                              } else if (isRecording) {
+                                                  viewModel.cancelRecording()
+                                              } else {
+                                                  if (recordAudioPermissionState.status.isGranted) {
+                                                      viewModel.toggleRecording()
+                                                  } else {
+                                                      recordAudioPermissionState.launchPermissionRequest()
+                                                  }
+                                              }
+                                          },
+                                          modifier = Modifier.size(40.dp)
+                                      ) {
+                                          Icon(
+                                              if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
+                                              null,
+                                              tint = if (isRecording) Color(0xFFEF5350) else Color(0xFF1C1C1E)
+                                          )
+                                      }
+
+                                      // 输入框
+                                      OutlinedTextField(
+                                          value = inputText,
+                                          onValueChange = { inputText = it },
+                                          modifier = Modifier.weight(1f),
+                                          placeholder = { Text(if (isRecording) "正在聊听..." else "输入消息...") },
+                                          shape = RoundedCornerShape(24.dp),
+                                          singleLine = true,
+                                          keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                          keyboardActions = KeyboardActions(onSend = {
+                                              if (inputText.isNotBlank()) {
+                                                  viewModel.sendMessage(inputText)
+                                                  inputText = ""
+                                              }
+                                          })
+                                      )
+
+                                      // 右侧：有文字时显示发送，无文字时 + 号
+                                      if (inputText.isNotBlank()) {
+                                          Box(
+                                              modifier = Modifier
+                                                  .size(40.dp)
+                                                  .clip(CircleShape)
+                                                  .background(Color(0xFF1C1C1E))
+                                                  .clickable {
+                                                      viewModel.sendMessage(inputText)
+                                                      inputText = ""
+                                                  },
+                                              contentAlignment = Alignment.Center
+                                          ) {
+                                              Icon(Icons.Default.Send, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                          }
+                                      } else {
+                                          IconButton(onClick = { showMorePanel = !showMorePanel }, modifier = Modifier.size(40.dp)) {
+                                              Icon(Icons.Default.Add, null, tint = Color(0xFF1C1C1E))
+                                          }
+                                      }
+                                  }
+
+                                  // + 号展开面板：图片 / 位置 / 视频
+                                  if (showMorePanel) {
+                                      Row(
+                                          modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                                          horizontalArrangement = Arrangement.spacedBy(20.dp)
+                                      ) {
+                                          MoreActionItem(Icons.Default.Image, "图片") {
+                                              galleryLauncher.launch("image/*")
+                                              showMorePanel = false
+                                          }
+                                          MoreActionItem(Icons.Default.Place, "位置") {
+                                              if (locationPermissionState.status.isGranted) viewModel.sendLocation() else locationPermissionState.launchPermissionRequest()
+                                              showMorePanel = false
+                                          }
+                                          MoreActionItem(Icons.Default.Videocam, "视频") {
+                                              launchVideoCapture()
+                                              showMorePanel = false
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @OptIn(ExperimentalMaterial3Api::class)
+          @Composable
+          fun ChatBubble(message: ChatMessage) {
+              val isUser = message.isUser
+              val context = androidx.compose.ui.platform.LocalContext.current
+              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
+                  Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
+                      message.imageBase64?.let { base64 ->
+                          val imageBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                          val bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                          bitmap?.let {
+                              Image(
+                                  bitmap = it.asImageBitmap(),
+                                  contentDescription = null,
+                                  modifier = Modifier
+                                      .sizeIn(maxWidth = 200.dp, maxHeight = 200.dp)
+                                      .clip(RoundedCornerShape(12.dp))
+                              )
+                              Spacer(modifier = Modifier.height(4.dp))
+                          }
+                      }
+
+                      message.videoPath?.let { path ->
+                          Surface(
+                              onClick = {
+                                  try {
+                                      val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                          setDataAndType(android.net.Uri.parse(path), "video/*")
+                                          addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                      }
+                                      context.startActivity(intent)
+                                  } catch (e: Exception) {}
+                              },
+                              shape = RoundedCornerShape(12.dp),
+                              color = if (isUser) Color(0xFF2C2C2E) else Color(0xFFE8EAF6)
+                          ) {
+                              Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                  Icon(Icons.Default.PlayArrow, null, tint = Color(0xFF4CAF50))
+                                  Spacer(modifier = Modifier.width(8.dp))
+                                  Text(if (isUser) "视频" else "点击播放视频", color = if (isUser) Color.White else Color(0xFF1C1C1E), fontSize = 13.sp)
+                              }
+                          }
+                          Spacer(modifier = Modifier.height(4.dp))
+                      }
+
+                      Surface(
+                          shape = RoundedCornerShape(
+                              topStart = 16.dp, topEnd = 16.dp,
+                              bottomStart = if (isUser) 16.dp else 4.dp,
+                              bottomEnd = if (isUser) 4.dp else 16.dp
+                          ),
+                          color = if (isUser) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+                      ) {
+                          Column(modifier = Modifier.padding(12.dp)) {
+                              Text(message.content, color = if (isUser) Color.White else Color.Black, fontSize = 14.sp, lineHeight = 20.sp)
+                              message.taskLabel?.let {
+                                  Spacer(modifier = Modifier.height(6.dp))
+                                  Surface(shape = RoundedCornerShape(6.dp), color = if (isUser) Color(0x33FFFFFF) else Color(0x1F6750A4)) {
+                                      Text(it, fontSize = 10.sp, color = if (isUser) Color(0xFFE0E0E0) else Color(0xFF6750A4), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                                  }
+                              }
+                              message.memoryHint?.let {
+                                  Spacer(modifier = Modifier.height(4.dp))
+                                  Text(it, fontSize = 10.sp, color = if (isUser) Color(0xB3FFFFFF) else Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+          @Composable
+          fun MoreActionItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+              Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
+                  Box(
+                      modifier = Modifier
+                          .size(48.dp)
+                          .clip(CircleShape)
+                          .background(Color(0xFFF2F2F7)),
+                      contentAlignment = Alignment.Center
+                  ) {
+                      Icon(icon, null, tint = Color(0xFF1C1C1E), modifier = Modifier.size(26.dp))
+                  }
+                  Spacer(modifier = Modifier.height(4.dp))
+                  Text(label, fontSize = 11.sp, color = Color(0xFF3A3A3C))
+              }
+          }
+          EOF
+          cat > app/src/main/java/com/example/stellae/VoiceInteractionService.kt << 'EOF'
+          package com.example.stellae
+
+          import android.app.Service
+          import android.content.Intent
+          import android.os.IBinder
+
+          // 此服务已由 VoiceCallManager 替代，保留作为兼容
+          class VoiceInteractionService : Service() {
+              override fun onBind(intent: Intent?): IBinder? = null
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+          }
+          EOF
+
+      # ========== 新增 integrations 包（集成开源项目骨架） ==========
+
+      # 12. VoiceCallManager（基于 xiaozhi-android-native）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/VoiceCallManager.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+          import android.media.AudioAttributes
+          import android.media.AudioFormat
+          import android.media.AudioManager
+          import android.media.AudioRecord
+          import android.media.AudioTrack
+          import android.media.MediaRecorder
+          import java.nio.ByteBuffer
+          import java.util.concurrent.TimeUnit
+          import kotlinx.coroutines.*
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import okhttp3.WebSocket
+          import okhttp3.WebSocketListener
+          import okio.ByteString
+
+          /**
+           * 实时语音通话管理器
+           * 参考: https://github.com/DayanJ/xiaozhi-android-native
+           * 使用 WebSocket + 16kHz PCM 实现实时双向语音
+           *
+           * 重要：语音通话需要一个真实的后端服务。请在 App 设置里填写
+           * "语音通话服务地址"（wss://你的服务器/ws）。
+           * 协议约定：客户端上行发送 16kHz/16bit/单声道 PCM 音频帧，
+           * 服务端下行返回文本回复或 16kHz PCM 音频帧。
+           * 可部署的开源后端：小智 xiaozhi-server（https://github.com/78/xiaozhi-server）
+           */
+          class VoiceCallManager(private val context: Context) {
+              private var webSocket: WebSocket? = null
+              private var audioRecord: AudioRecord? = null
+              private var audioTrack: AudioTrack? = null
+              private var recordingJob: Job? = null
+              private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+              private val client = OkHttpClient.Builder()
+                  .connectTimeout(10, TimeUnit.SECONDS)
+                  .readTimeout(30, TimeUnit.SECONDS)
+                  .build()
+              private var isRunning = false
+
+              fun startCall(serverUrl: String, onStart: () -> Unit, onMessage: (String) -> Unit, onError: (String) -> Unit) {
+                  if (isRunning) return
+                  if (serverUrl.isBlank()) {
+                      onError("未配置语音服务地址，请先在设置里填写")
+                      return
+                  }
+                  isRunning = true
+
+                  val request = Request.Builder().url(serverUrl).build()
+                  webSocket = client.newWebSocket(request, object : WebSocketListener() {
+                      override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                          onStart()
+                          startRecording(onError)
+                      }
+                      override fun onMessage(webSocket: WebSocket, text: String) {
+                          onMessage(text) // 收到 AI 文字回复
+                      }
+                      override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                          playAudio(bytes) // 收到 AI 音频（16kHz PCM）
+                      }
+                      override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
+                          stopRecording()
+                          onError(t.message ?: "连接失败")
+                      }
+                  })
+              }
+
+              // 采集麦克风 PCM 音频并实时通过 WebSocket 发送
+              private fun startRecording(onError: (String) -> Unit) {
+                  try {
+                      val sampleRate = 16000
+                      val minBuf = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                      audioRecord = AudioRecord(
+                          MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO,
+                          AudioFormat.ENCODING_PCM_16BIT, minBuf * 4
+                      ).apply { startRecording() }
+                      recordingJob = scope.launch {
+                          val buffer = ShortArray(minBuf)
+                          while (isRunning) {
+                              val read = audioRecord?.read(buffer, 0, buffer.size) ?: -1
+                              if (read > 0) {
+                                  val byteBuf = ByteBuffer.allocate(read * 2)
+                                  for (i in 0 until read) byteBuf.putShort(buffer[i])
+                                  webSocket?.send(ByteString.of(*byteBuf.array()))
+                              }
+                          }
+                      }
+                  } catch (e: Exception) {
+                      onError("录音启动失败: ${e.message}")
+                  }
+              }
+
+              // 播放服务器返回的 16kHz PCM 音频
+              private fun playAudio(bytes: ByteString) {
+                  try {
+                      if (audioTrack == null) {
+                          val minBuf = AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                          audioTrack = AudioTrack(
+                              AudioAttributes.Builder()
+                                  .setUsage(AudioAttributes.USAGE_MEDIA)
+                                  .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                  .build(),
+                              AudioFormat.Builder()
+                                  .setSampleRate(16000)
+                                  .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                  .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                                  .build(),
+                              minBuf, AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE
+                          ).apply { play() }
+                      }
+                      audioTrack?.write(bytes.toByteArray(), 0, bytes.size())
+                  } catch (e: Exception) {
+                      // 播放失败忽略
+                  }
+              }
+
+              private fun stopRecording() {
+                  recordingJob?.cancel()
+                  try { audioRecord?.stop() } catch (_: Exception) {}
+                  audioRecord?.release()
+                  audioRecord = null
+              }
+
+              fun endCall() {
+                  isRunning = false
+                  stopRecording()
+                  try { audioTrack?.stop() } catch (_: Exception) {}
+                  audioTrack?.release()
+                  audioTrack = null
+                  webSocket?.close(1000, "用户挂断")
+                  webSocket = null
+              }
+
+              fun sendText(text: String) {
+                  webSocket?.send(text)
+              }
+          }
+          EOF
+
+      # 13. VoiceRobotManager（基于 Volc Dialog SDK，骨架）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/VoiceRobotManager.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+
+          /**
+           * 基于火山引擎 Dialog SDK 的实时对话
+           * 参考: https://github.com/qingfeng19491001/VoiceRobot
+           * 需要引入 Volc Dialog SDK aar
+           */
+          class VoiceRobotManager(private val context: Context) {
+              // TODO: 实现 Volc Dialog 初始化、开始对话、结束对话
+              fun startConversation() {}
+              fun stopConversation() {}
+          }
+          EOF
+
+      # 14. MemoryVectorStore（基于 Sora-mem 的向量检索）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/MemoryVectorStore.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+          import com.example.stellae.data.MemoryEntity
+
+          /**
+           * 向量记忆存储（Sora-mem 风格）
+           * 参考: https://github.com/LianjiaTech/Sora-mem
+           * 使用 SQLite + 向量扩展（如 sqlite-vec）
+           */
+          class MemoryVectorStore(private val context: Context) {
+              // TODO: 初始化向量数据库
+              suspend fun insertVector(memory: MemoryEntity, embedding: FloatArray) {}
+              suspend fun search(queryEmbedding: FloatArray, topK: Int = 5): List<MemoryEntity> = emptyList()
+          }
+          EOF
+
+      # 15. OfflineTTSManager（基于 VoxSherpa）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/OfflineTTSManager.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+
+          /**
+           * 离线高质量 TTS（VoxSherpa）
+           * 参考: https://github.com/mozilla/TTS
+           * 或 VoxSherpa: https://github.com/voxloud/voxsherpa
+           */
+          class OfflineTTSManager(private val context: Context) {
+              // TODO: 加载模型，合成语音
+              suspend fun synthesize(text: String, voice: String = "default"): ByteArray? = null
+          }
+          EOF
+
+      # 16. MapLocationManager（基于 osmdroid）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/MapLocationManager.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.content.Context
+          import org.osmdroid.config.Configuration
+          import org.osmdroid.util.GeoPoint
+          import org.osmdroid.views.MapView
+
+          /**
+           * 地图定位管理（osmdroid）
+           * 参考: https://github.com/osmdroid/osmdroid
+           */
+          class MapLocationManager(private val context: Context) {
+              init {
+                  Configuration.getInstance().load(context, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+              }
+
+              fun createMapView(): MapView = MapView(context).apply {
+                  setBuiltInZoomControls(true)
+                  setMultiTouchControls(true)
+              }
+
+              fun moveToLocation(mapView: MapView, lat: Double, lon: Double) {
+                  mapView.controller.setCenter(GeoPoint(lat, lon))
+                  mapView.controller.setZoom(15.0)
+              }
+          }
+          EOF
+
+      # 17. FloatingCompanionService（基于 AI-Live-Overflow）
+      - run: |
+          cat > app/src/main/java/com/example/stellae/integrations/FloatingCompanionService.kt << 'EOF'
+          package com.example.stellae.integrations
+
+          import android.app.Service
+          import android.content.Intent
+          import android.os.IBinder
+
+          /**
+           * 悬浮窗陪伴服务（AI-Live-Overflow 风格）
+           * 参考: https://github.com/Mr-Enovation/AI-Live-Overflow
+           * 需要 SYSTEM_ALERT_WINDOW 权限
+           */
+          class FloatingCompanionService : Service() {
+              override fun onBind(intent: Intent?): IBinder? = null
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  // TODO: 创建悬浮窗，加载 AI 交互界面
+                  return START_STICKY
+              }
+              override fun onDestroy() {
+                  // 移除悬浮窗
+                  super.onDestroy()
+              }
+          }
+          EOF
+
+      # ========== 构建 ==========
       - run: gradle assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
