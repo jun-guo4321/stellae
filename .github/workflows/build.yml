@@ -51,8 +51,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 10
-                  versionName = "1.9"
+                  versionCode = 11
+                  versionName = "2.0"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -2552,7 +2552,7 @@ jobs:
                           addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                       }
                       videoLauncher.launch(intent)
-                  } catch (e: ActivityNotFoundException) {
+                  } catch (e: android.content.ActivityNotFoundException) {
                       viewModel.sendMessage("没有找到能录视频的应用")
                   } catch (e: Exception) {
                       viewModel.sendMessage("无法打开相机: ${e.message}")
