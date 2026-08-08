@@ -51,8 +51,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 5
-                  versionName = "1.4"
+                  versionCode = 6
+                  versionName = "1.5"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -1783,6 +1783,7 @@ jobs:
           import androidx.compose.ui.Alignment
           import androidx.compose.ui.Modifier
           import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
           import androidx.lifecycle.viewmodel.compose.viewModel
           import com.example.stellae.ChatViewModel
           import kotlinx.coroutines.launch
@@ -2450,7 +2451,9 @@ jobs:
                               minBuf, AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE
                           ).apply { play() }
                       }
-                      audioTrack?.write(bytes.toByteArray(), 0, bytes.size())
+                      val pcm = bytes.toByteArray()
+                      // 使用带 writeMode 的四参数重载，避免 Kotlin 重载歧义
+                      audioTrack?.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
                   } catch (e: Exception) {
                       // 播放失败忽略
                   }
