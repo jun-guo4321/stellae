@@ -52,8 +52,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 17
-                  versionName = "2.6"
+                  versionCode = 18
+                  versionName = "2.7"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -877,7 +877,7 @@ jobs:
                       // Vosk 不可用 → 使用在线识别（百度短语音）
                       startOnlineAsr(onResult, onError)
                   } else {
-                      onError?.invoke("当前设备不支持系统语音识别，请配置在线语音识别 API")
+                      onError?.invoke("离线语音识别模型未随 App 打包，请在 GitHub 重新构建最新 APK（v2.7+）后重试")
                       onResultCallback?.invoke("")
                   }
               }
@@ -1800,32 +1800,18 @@ jobs:
                   viewModelScope.launch { speechManager.previewVoice(voice) }
               }
 
-              // 语音通话（调用 VoiceCallManager）
+              // 语音通话（内置语音对话：识别→大模型→朗读，无需服务器地址）
               fun toggleVoiceCall() {
                   if (_isInVoiceCall.value) {
-                      voiceCallManager.endCall()
+                      // 结束通话：停止录音
+                      stopRecording()
                       _isInVoiceCall.value = false
                       _messages.value = _messages.value + ChatMessage("📞 语音通话已结束", false, "语音通话")
                   } else {
-                      val serverUrl = getVoiceServerUrl()
-                      if (serverUrl.isBlank()) {
-                          _isInVoiceCall.value = false
-                          _messages.value = _messages.value + ChatMessage("⚠️ 语音通话：请先在设置里填写语音服务地址（wss://你的服务器/ws）", false, "语音通话")
-                          return
-                      }
                       _isInVoiceCall.value = true
-                      _messages.value = _messages.value + ChatMessage("📞 正在建立语音通话...", false, "语音通话")
-                      voiceCallManager.startCall(
-                          serverUrl = serverUrl,
-                          onStart = { /* 连接成功 */ },
-                          onMessage = { text ->
-                              _messages.value = _messages.value + ChatMessage(text, false, "语音通话")
-                          },
-                          onError = { error ->
-                              _messages.value = _messages.value + ChatMessage("⚠️ 语音通话出错: $error", false, "语音通话")
-                              _isInVoiceCall.value = false
-                          }
-                      )
+                      _messages.value = _messages.value + ChatMessage("📞 语音对话中，请说话...", false, "语音通话")
+                      // 直接开始一次语音识别（系统识别 → Vosk 离线 → 在线回退）
+                      startRecording()
                   }
               }
               private suspend fun fetchLocation() {
@@ -2711,6 +2697,25 @@ jobs:
                   if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
               }
 
+              // 返回键：设置页打开时返回=关设置回聊天页；聊天页时第一次提示、第二次退出
+              var backPressedOnce by remember { mutableStateOf(false) }
+              BackHandler {
+                  if (showSettings) {
+                      showSettings = false
+                      backPressedOnce = false
+                  } else if (backPressedOnce) {
+                      val act = context as? android.app.Activity
+                      act?.finish()
+                  } else {
+                      backPressedOnce = true
+                      android.widget.Toast.makeText(context, "再按一次返回退出", android.widget.Toast.LENGTH_SHORT).show()
+                      kotlinx.coroutines.MainScope().launch {
+                          delay(2000)
+                          backPressedOnce = false
+                      }
+                  }
+              }
+
               if (showSettings) {
                   SettingsScreen(onBack = { showSettings = false }, viewModel = viewModel)
               } else {
@@ -3066,20 +3071,19 @@ jobs:
                   contentAlignment = Alignment.Center
               ) {
                   if (customAvatar != null) {
-                      // 用户上传的自定义 Q 版形象（ContentScale.Crop 保持比例不变形 + 呼吸动画）
+                      // 用户上传的自定义形象：铺满整个上部区域（不裁圆，整幅显示 + 轻微呼吸）
                       Image(
                           bitmap = customAvatar.asImageBitmap(),
                           contentDescription = null,
                           contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                           modifier = Modifier
-                              .size(160.dp)
+                              .fillMaxWidth()
+                              .fillMaxHeight()
                               .graphicsLayer {
-                                  val s = 1f + (bob - 0.5f) * 0.06f
+                                  val s = 1f + (bob - 0.5f) * 0.03f
                                   scaleX = s
                                   scaleY = s
                               }
-                              .clip(androidx.compose.foundation.shape.CircleShape)
-                              .background(Color(0xFFEDE7F6))
                       )
                   } else {
                   Canvas(modifier = Modifier.size(170.dp)) {
