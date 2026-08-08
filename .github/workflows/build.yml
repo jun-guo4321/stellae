@@ -23,6 +23,7 @@ jobs:
           mkdir -p app/src/main/java/com/example/stellae/integrations
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/assets/vosk
           mkdir -p gradle/wrapper
       - uses: gradle/actions/setup-gradle@v3
         with:
@@ -51,8 +52,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 12
-                  versionName = "2.1"
+                  versionCode = 14
+                  versionName = "2.3"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -99,6 +100,9 @@ jobs:
               // 6. 悬浮窗 (AI-Live-Overflow) - 需要系统权限，代码骨架已包含
               // 7. 其他通用
               implementation("com.github.kittinunf.fuel:fuel:2.3.1") // 用于 HTTP 请求
+              // 8. Vosk 离线语音识别（无 key、离线可用，系统识别不可用时自动回退）
+              implementation("com.alphacephei:vosk-android:0.3.47")
+              implementation("net.java.dev.jna:jna:5.13.0@aar")
           }
           EOF
       - run: |
@@ -174,6 +178,16 @@ jobs:
               <external-path name="external" path="." />
           </paths>
           EOF
+
+      # 下载 Vosk 中文离线语音识别模型（约 42MB，打进 APK，装上即可离线识别）
+      - run: |
+          echo "下载 Vosk 中文模型..."
+          curl -sL -o /tmp/vosk-model-small-cn.zip "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
+          ls -la /tmp/vosk-model-small-cn.zip
+          cd app/src/main/assets/vosk
+          unzip -o -q /tmp/vosk-model-small-cn.zip
+          mv vosk-model-small-cn-0.22 model-small-cn
+          ls -la model-small-cn | head -10
 
       # ========== 所有源码文件（包含集成骨架） ==========
 
@@ -775,6 +789,8 @@ jobs:
           import java.io.File
           import java.io.FileOutputStream
           import java.util.Locale
+          import org.vosk.Model
+          import org.vosk.Recognizer
 
           class SpeechManager(private val context: Context) {
               private var speechRecognizer: SpeechRecognizer? = null
@@ -842,12 +858,66 @@ jobs:
                           putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                       }
                       speechRecognizer?.startListening(intent)
+                  } else if (tryStartVosk(onResult, onError)) {
+                      // 系统识别不可用 → 使用 Vosk 离线识别（无 key、离线可用）
                   } else if (asrApiKey.isNotBlank()) {
-                      // 系统识别不可用 → 使用在线识别（百度短语音）
+                      // Vosk 不可用 → 使用在线识别（百度短语音）
                       startOnlineAsr(onResult, onError)
                   } else {
-                      onError?.invoke("当前设备不支持系统语音识别，请在设置里配置在线语音识别 API")
+                      onError?.invoke("当前设备不支持系统语音识别，请配置在线语音识别 API")
                       onResultCallback?.invoke("")
+                  }
+              }
+
+              // ---- Vosk 离线语音识别（无 key）----
+              private var voskRecognizer: Recognizer? = null
+              private var voskActive = false
+
+              private fun tryStartVosk(onResult: (String) -> Unit, onError: ((String) -> Unit)?): Boolean {
+                  return try {
+                      voskActive = true
+                      val model = Model(context.assets, "vosk/model-small-cn")
+                      voskRecognizer = Recognizer(model, 16000.0f)
+                      val sampleRate = 16000
+                      val minBuf = android.media.AudioRecord.getMinBufferSize(
+                          sampleRate, android.media.AudioFormat.CHANNEL_IN_MONO,
+                          android.media.AudioFormat.ENCODING_PCM_16BIT
+                      )
+                      audioRecord = android.media.AudioRecord(
+                          android.media.MediaRecorder.AudioSource.MIC, sampleRate,
+                          android.media.AudioFormat.CHANNEL_IN_MONO,
+                          android.media.AudioFormat.ENCODING_PCM_16BIT, minBuf * 4
+                      )
+                      audioRecord?.startRecording()
+                      val buf = ByteArray(minBuf)
+                      Thread {
+                          try {
+                              while (voskActive) {
+                                  val n = audioRecord?.read(buf, 0, buf.size) ?: -1
+                                  if (n > 0) voskRecognizer?.acceptWaveForm(buf, n) else break
+                              }
+                          } catch (e: Exception) {
+                          }
+                      }.start()
+                      true
+                  } catch (e: Exception) {
+                      voskActive = false
+                      onError?.invoke("离线语音识别初始化失败: ${e.message}")
+                      false
+                  }
+              }
+
+              private fun finishVoskAsr() {
+                  kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                      try {
+                          val raw = voskRecognizer?.finalResult ?: ""
+                          voskRecognizer?.close()
+                          voskRecognizer = null
+                          val text = extractJsonField(raw, "text") ?: ""
+                          onResultCallback?.invoke(text)
+                      } catch (e: Exception) {
+                          onResultCallback?.invoke("")
+                      }
                   }
               }
 
@@ -894,6 +964,14 @@ jobs:
               }
 
               fun stopListening() {
+                  if (voskActive) {
+                      voskActive = false
+                      try { audioRecord?.stop() } catch (_: Exception) {}
+                      audioRecord?.release()
+                      audioRecord = null
+                      finishVoskAsr()
+                      return
+                  }
                   if (onlineAsrActive) {
                       onlineAsrActive = false
                       try { audioRecord?.stop() } catch (_: Exception) {}
@@ -1455,8 +1533,8 @@ jobs:
                               val requestMap = HashMap<String, Any>()
                               requestMap["model"] = modelId
                               requestMap["messages"] = messages
-                              requestMap["temperature"] = 0.85
-                              requestMap["max_tokens"] = 150
+                              requestMap["temperature"] = 0.7
+                              requestMap["max_tokens"] = 250
 
                               val body = gson.toJson(requestMap).toRequestBody("application/json".toMediaType())
                               val request = Request.Builder().url(baseUrl).header("Authorization", "Bearer $apiKey").post(body).build()
@@ -1478,7 +1556,7 @@ jobs:
                                   // \u7f51\u7edc\u95ee\u9898\uff0c\u7a0d\u4f5c\u7b49\u5f85\u91cd\u8bd5
                               }
                           }
-                          if (attempt < 2) delay(500L * (attempt + 1))
+                          if (attempt < 2) delay(250L * (attempt + 1))
                       }
                       buildErrorFallback(messages, lastError)
                   }
@@ -1795,22 +1873,29 @@ jobs:
               }
               private suspend fun reverseGeocode(location: Location): LocationInfo? {
                   return withContext(Dispatchers.IO) {
+                      val lat = location.latitude
+                      val lon = location.longitude
+                      val fallback = LocationInfo("位置 ${"%.4f".format(lat)}, ${"%.4f".format(lon)}", "", "坐标定位", lat, lon)
                       try {
-                          val lat = location.latitude
-                          val lon = location.longitude
                           val url = "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&addressdetails=1"
                           val request = Request.Builder().url(url).header("User-Agent", "StellaeApp").build()
                           val response = httpClient.newCall(request).execute()
-                          if (!response.isSuccessful) return@withContext null
-                          val json = response.body?.string() ?: return@withContext null
+                          if (!response.isSuccessful) return@withContext fallback
+                          val json = response.body?.string() ?: return@withContext fallback
                           val root = gson.fromJson(json, Map::class.java)
-                          val address = root["address"] as? Map<*, *> ?: return@withContext null
+                          val address = root["address"] as? Map<*, *> ?: return@withContext fallback
+                          // 中国地区常见字段：province/state/city/county/town/village
                           val city = address["city"]?.toString()
                               ?: address["town"]?.toString()
                               ?: address["village"]?.toString()
                               ?: address["county"]?.toString()
-                              ?: "未知城市"
-                          val district = address["suburb"]?.toString() ?: address["neighbourhood"]?.toString() ?: ""
+                              ?: address["province"]?.toString()
+                              ?: address["state"]?.toString()
+                              ?: "位置 ${"%.4f".format(lat)}, ${"%.4f".format(lon)}"
+                          val district = address["suburb"]?.toString()
+                              ?: address["neighbourhood"]?.toString()
+                              ?: address["county_district"]?.toString()
+                              ?: ""
                           val fullAddress = (address["road"]?.toString() ?: "") + (address["house_number"]?.toString()?.let { " $it" } ?: "")
                           return@withContext LocationInfo(
                               city = city,
@@ -1819,7 +1904,10 @@ jobs:
                               lat = lat,
                               lon = lon
                           )
-                      } catch (e: Exception) { e.printStackTrace(); null }
+                      } catch (e: Exception) {
+                          e.printStackTrace()
+                          fallback
+                      }
                   }
               }
 
@@ -2369,6 +2457,11 @@ jobs:
                               valueRange = -50f..50f,
                           )
                           Text("当前音量: ${voiceVolume}% (默认 0)", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+                          Spacer(modifier = Modifier.height(12.dp))
+                          Button(onClick = { scope.launch { viewModel.previewVoice(selectedVoice) } }) {
+                              Text("🎧 试听当前调音效果")
+                          }
+                          Text("试听会使用当前选中的音色 + 语速/音调/音量设置", fontSize = 11.sp, color = androidx.compose.ui.graphics.Color.Gray)
                       }}
 
                       // 9. 在线语音识别（系统识别不可用时使用）
@@ -2764,6 +2857,19 @@ jobs:
                                               label = "位置",
                                               onClick = {
                                                   if (locationPermissionState.status.isGranted) viewModel.sendLocation() else locationPermissionState.launchPermissionRequest()
+                                                  showMorePanel = false
+                                              }
+                                          )
+                                          // 录像：独立按钮，点击启动录像（拍照与录像分开）
+                                          MoreActionItem(
+                                              icon = Icons.Default.Videocam,
+                                              label = "录像",
+                                              onClick = {
+                                                  if (cameraPermissionState.status.isGranted) {
+                                                      launchVideoCapture()
+                                                  } else {
+                                                      cameraPermissionState.launchPermissionRequest()
+                                                  }
                                                   showMorePanel = false
                                               }
                                           )
