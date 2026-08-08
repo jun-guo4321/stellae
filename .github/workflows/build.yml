@@ -52,8 +52,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 20
-                  versionName = "2.9"
+                  versionCode = 21
+                  versionName = "3.0"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -887,12 +887,45 @@ jobs:
               private var voskRecognizer: Recognizer? = null
               private var voskActive = false
 
+              // 把 assets/vosk/model-small-cn 复制到 filesDir/vosk_model，返回模型目录路径
+              private fun ensureVoskModelPath(): String {
+                  val destDir = java.io.File(context.filesDir, "vosk_model")
+                  if (!destDir.exists()) {
+                      copyAssetFolder(context.assets, "vosk/model-small-cn", destDir)
+                  }
+                  return destDir.absolutePath
+              }
+
+              private fun copyAssetFolder(am: android.content.res.AssetManager, fromPath: String, toFile: java.io.File) {
+                  val list = am.list(fromPath) ?: return
+                  if (list.isEmpty()) {
+                      // 单个文件
+                      try {
+                          am.open(fromPath).use { input ->
+                              val outFile = java.io.File(toFile, java.io.File(fromPath).name)
+                              outFile.parentFile?.mkdirs()
+                              java.io.FileOutputStream(outFile).use { output -> input.copyTo(output) }
+                          }
+                      } catch (e: Exception) {
+                          Log.e("Vosk", "copy asset file $fromPath: ${e.message}")
+                      }
+                  } else {
+                      // 目录：递归复制
+                      toFile.mkdirs()
+                      for (name in list) {
+                          val assetPath = "$fromPath/$name"
+                          val dest = java.io.File(toFile, name)
+                          copyAssetFolder(am, assetPath, dest)
+                      }
+                  }
+              }
+
               private fun tryStartVosk(onResult: (String) -> Unit, onError: ((String) -> Unit)?): Boolean {
                   return try {
                       voskActive = true
-                      // 官方推荐用法：直接从 assets 加载模型（vosk-android 0.3.75 支持 Model(AssetManager, path)）
-                      // 配合 gradle 里 androidResources.noCompress 确保模型不压缩
-                      val model = org.vosk.Model(context.assets, "vosk/model-small-cn")
+                      // Vosk 只提供 Model() 和 Model(String)：把模型从 assets 复制到 files 目录，再传路径
+                      val modelPath = ensureVoskModelPath()
+                      val model = org.vosk.Model(modelPath)
                       voskRecognizer = Recognizer(model, 16000.0f)
                       val sampleRate = 16000
                       val minBuf = android.media.AudioRecord.getMinBufferSize(
