@@ -51,8 +51,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 11
-                  versionName = "2.0"
+                  versionCode = 12
+                  versionName = "2.1"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -1608,9 +1608,6 @@ jobs:
                   speechManager.speechVolume = getVoiceVolume()
                   speechManager.asrApiKey = getAsrApiKey()
                   speechManager.asrSecretKey = getAsrSecretKey()
-                  aiRepository.apiKey = getApiKey()
-                  aiRepository.baseUrl = getBaseUrl()
-                  aiRepository.modelId = getModelId()
                   _avatarImage.value = getAvatarImage()
               }
 
@@ -1661,14 +1658,6 @@ jobs:
               // 数字人开关（Q版形象展示）
               fun getAvatarEnabled(): Boolean = runBlocking { memoryManager.getSetting("avatar_enabled") != "0" }
               fun setAvatarEnabled(v: Boolean) { viewModelScope.launch { memoryManager.setSetting("avatar_enabled", if (v) "1" else "0") } }
-
-              // 火山方舟 API 配置（默认值已内置）
-              fun getApiKey(): String = runBlocking { memoryManager.getSetting("api_key") ?: "ark-cc51dab3-1c7e-4f20-9764-45ec3dfa2586-2d686" }
-              fun setApiKey(k: String) { viewModelScope.launch { memoryManager.setSetting("api_key", k); aiRepository.apiKey = k } }
-              fun getBaseUrl(): String = runBlocking { memoryManager.getSetting("api_base_url") ?: "https://ark.cn-beijing.volces.com/api/v3/chat/completions" }
-              fun setBaseUrl(u: String) { viewModelScope.launch { memoryManager.setSetting("api_base_url", u); aiRepository.baseUrl = u } }
-              fun getModelId(): String = runBlocking { memoryManager.getSetting("model_id") ?: "ep-20260807115902-67t9m" }
-              fun setModelId(m: String) { viewModelScope.launch { memoryManager.setSetting("model_id", m); aiRepository.modelId = m } }
 
               // 数字人形象（base64 图片，空=用内置 Canvas 形象）
               fun getAvatarImage(): String = runBlocking { memoryManager.getSetting("avatar_image") ?: "" }
@@ -1861,11 +1850,28 @@ jobs:
                   }
               }
               
-              // 发送视频（微信式"拍摄"）
+              // 发送视频（微信式"拍摄"）——提取首帧让 AI 能看到画面内容
               fun sendVideo(videoPath: String) {
                   viewModelScope.launch {
                       _messages.value = _messages.value + ChatMessage("🎬 我拍了一段视频", true, taskLabel = "视频", videoPath = videoPath)
-                      processWithXiyuAI("用户拍了一段视频，简单回应即可")
+                      val frame = extractVideoFrame(videoPath)
+                      processWithXiyuAI("用户拍了一段视频，请根据视频画面内容回应", frame)
+                  }
+              }
+
+              // 提取视频首帧画面（用 MediaMetadataRetriever），失败返回 null
+              private suspend fun extractVideoFrame(videoPath: String): String? {
+                  return withContext(Dispatchers.IO) {
+                      try {
+                          val retriever = android.media.MediaMetadataRetriever()
+                          retriever.setDataSource(getApplication(), android.net.Uri.parse(videoPath))
+                          val frame = retriever.getFrameAtTime(0)
+                          retriever.release()
+                          if (frame != null) AIRepository.bitmapToBase64(frame) else null
+                      } catch (e: Exception) {
+                          e.printStackTrace()
+                          null
+                      }
                   }
               }
 
@@ -2099,9 +2105,6 @@ jobs:
               var asrApiKey by remember { mutableStateOf(viewModel.getAsrApiKey()) }
               var asrSecretKey by remember { mutableStateOf(viewModel.getAsrSecretKey()) }
               var avatarEnabled by remember { mutableStateOf(viewModel.getAvatarEnabled()) }
-              var apiKey by remember { mutableStateOf(viewModel.getApiKey()) }
-              var baseUrl by remember { mutableStateOf(viewModel.getBaseUrl()) }
-              var modelId by remember { mutableStateOf(viewModel.getModelId()) }
               val context = LocalContext.current
               val avatarPickerLauncher = rememberLauncherForActivityResult(
                   contract = ActivityResultContracts.GetContent()
@@ -2290,22 +2293,7 @@ jobs:
                           Spacer(modifier = Modifier.height(4.dp))
                           Text("提示：可先用 AI 绘图工具把照片转成 Q 版头像，再上传为数字人形象。", fontSize = 11.sp, color = androidx.compose.ui.graphics.Color.Gray)
                       }}
-                      // 6.6 模型 API 配置（火山方舟）
-                      Card { Column(modifier = Modifier.padding(16.dp)) {
-                          Text("模型 API 配置（火山方舟）", style = MaterialTheme.typography.titleMedium)
-                          Spacer(modifier = Modifier.height(4.dp))
-                          Text("大模型对话使用的火山方舟 API Key 和模型 ID，默认值已内置。", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
-                          Spacer(modifier = Modifier.height(8.dp))
-                          OutlinedTextField(value = apiKey, onValueChange = { apiKey = it }, label = { Text("API Key") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                          Spacer(modifier = Modifier.height(8.dp))
-                          OutlinedTextField(value = modelId, onValueChange = { modelId = it }, label = { Text("模型 ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                          Spacer(modifier = Modifier.height(8.dp))
-                          OutlinedTextField(value = baseUrl, onValueChange = { baseUrl = it }, label = { Text("接口地址") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                          Spacer(modifier = Modifier.height(8.dp))
-                          Button(onClick = { viewModel.setApiKey(apiKey.trim()); viewModel.setModelId(modelId.trim()); viewModel.setBaseUrl(baseUrl.trim()) }) {
-                              Text("保存 API 配置")
-                          }
-                      }}
+                      // 6.6 已移除：模型 API 配置默认内置，无需在设置里填写
                       // 7. 语音通话服务地址（预设选项）
                       Card { Column(modifier = Modifier.padding(16.dp)) {
                           Text("语音通话", style = MaterialTheme.typography.titleMedium)
@@ -2427,7 +2415,9 @@ jobs:
           import androidx.activity.result.contract.ActivityResultContracts
           import androidx.compose.animation.core.*
           import androidx.compose.foundation.Canvas
+          import androidx.compose.foundation.ExperimentalFoundationApi
           import androidx.compose.foundation.Image
+          import androidx.compose.foundation.combinedClickable
           import androidx.compose.foundation.background
           import androidx.compose.foundation.clickable
           import androidx.compose.foundation.layout.*
@@ -2488,6 +2478,28 @@ jobs:
               val recordAudioPermissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
               val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
               val locationPermissionState = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
+
+              // 打开应用自动申请定位 + 相机 + 录音权限
+              LaunchedEffect(Unit) {
+                  if (!locationPermissionState.status.isGranted) {
+                      locationPermissionState.launchPermissionRequest()
+                  }
+                  if (!cameraPermissionState.status.isGranted) {
+                      cameraPermissionState.launchPermissionRequest()
+                  }
+                  if (!recordAudioPermissionState.status.isGranted) {
+                      recordAudioPermissionState.launchPermissionRequest()
+                  }
+                  if (locationPermissionState.status.isGranted) {
+                      viewModel.requestLocationUpdate()
+                  }
+              }
+              // 权限状态变化时再尝试获取位置
+              LaunchedEffect(locationPermissionState.status) {
+                  if (locationPermissionState.status.isGranted) {
+                      viewModel.requestLocationUpdate()
+                  }
+              }
 
               val cameraLauncher = rememberLauncherForActivityResult(
                   ActivityResultContracts.TakePicturePreview()
@@ -2610,9 +2622,12 @@ jobs:
                       Column(modifier = Modifier.fillMaxSize().padding(padding)) {
                           // Q\u7248\u6570\u5b57\u4eba\u533a\u57df\uff08\u53ef\u5f00\u5173\uff09
                           if (avatarEnabled) {
+                              // 取最近一条用户消息，让数字人根据对话内容实时演绎动作
+                              val lastUserText = messages.lastOrNull { it.isUser }?.content ?: ""
                               DigitalHumanPanel(
                                   emotion = currentEmotion,
                                   status = companionStatus,
+                                  userInput = lastUserText,
                                   isProcessing = isProcessing,
                                   companionName = companionName,
                                   avatarImage = avatarImage
@@ -2719,20 +2734,29 @@ jobs:
                                               galleryLauncher.launch("image/*")
                                               showMorePanel = false
                                           }
-                                          MoreActionItem(Icons.Default.PhotoCamera, "拍照") {
-                                              if (cameraPermissionState.status.isGranted) {
-                                                  cameraLauncher.launch(null)
-                                              } else {
-                                                  cameraPermissionState.launchPermissionRequest()
+                                          // 拍照：单击=拍照，长按=录像（相机权限未授予时自动申请）
+                                          MoreActionItem(
+                                              icon = Icons.Default.PhotoCamera,
+                                              label = "拍照",
+                                              onClick = {
+                                                  if (cameraPermissionState.status.isGranted) {
+                                                      cameraLauncher.launch(null)
+                                                  } else {
+                                                      cameraPermissionState.launchPermissionRequest()
+                                                  }
+                                                  showMorePanel = false
+                                              },
+                                              onLongClick = {
+                                                  if (cameraPermissionState.status.isGranted) {
+                                                      launchVideoCapture()
+                                                  } else {
+                                                      cameraPermissionState.launchPermissionRequest()
+                                                  }
+                                                  showMorePanel = false
                                               }
-                                              showMorePanel = false
-                                          }
+                                          )
                                           MoreActionItem(Icons.Default.Place, "位置") {
                                               if (locationPermissionState.status.isGranted) viewModel.sendLocation() else locationPermissionState.launchPermissionRequest()
-                                              showMorePanel = false
-                                          }
-                                          MoreActionItem(Icons.Default.Videocam, "视频") {
-                                              launchVideoCapture()
                                               showMorePanel = false
                                           }
                                       }
@@ -2814,9 +2838,15 @@ jobs:
                   }
               }
           }
+          @OptIn(ExperimentalFoundationApi::class)
           @Composable
-          fun MoreActionItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-              Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
+          fun MoreActionItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
+              val mod = if (onLongClick != null) {
+                  Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+              } else {
+                  Modifier.clickable(onClick = onClick)
+              }
+              Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = mod) {
                   Box(
                       modifier = Modifier
                           .size(48.dp)
@@ -2833,7 +2863,7 @@ jobs:
 
           // ===== Q版数字人（Canvas 绘制，根据情绪/活动切换表情动作）=====
           @Composable
-          fun DigitalHumanPanel(emotion: String, status: String, isProcessing: Boolean, companionName: String, avatarImage: String = "") {
+          fun DigitalHumanPanel(emotion: String, status: String, isProcessing: Boolean, companionName: String, avatarImage: String = "", userInput: String = "") {
               val mood = when {
                   emotion.contains("开心") -> 0
                   emotion.contains("难过") -> 1
@@ -2850,12 +2880,15 @@ jobs:
                       } catch (e: Exception) { null }
                   } else null
               }
-              // 根据"正在做什么"决定动作
+              // 实时动作：优先根据用户对话内容，其次根据当前状态
               val action = when {
-                  status.contains("看") || status.contains("书") -> "reading"
-                  status.contains("吃") -> "eating"
-                  status.contains("睡") -> "sleeping"
-                  status.contains("散步") -> "walking"
+                  userInput.contains("跑步") || userInput.contains("跑") || userInput.contains("锻炼") || status.contains("跑步") -> "running"
+                  userInput.contains("读书") || userInput.contains("看书") || userInput.contains("书") || status.contains("看") || status.contains("书") -> "reading"
+                  userInput.contains("吃饭") || userInput.contains("吃") || status.contains("吃") -> "eating"
+                  userInput.contains("睡觉") || userInput.contains("睡") || status.contains("睡") -> "sleeping"
+                  userInput.contains("散步") || userInput.contains("走") || status.contains("散步") -> "walking"
+                  userInput.contains("唱歌") || userInput.contains("音乐") || userInput.contains("听歌") -> "singing"
+                  userInput.contains("跳舞") || userInput.contains("跳") -> "dancing"
                   else -> "idle"
               }
               // 呼吸/待机动画
@@ -2876,10 +2909,11 @@ jobs:
                   contentAlignment = Alignment.Center
               ) {
                   if (customAvatar != null) {
-                      // 用户上传的自定义 Q 版形象（圆形 + 呼吸动画）
+                      // 用户上传的自定义 Q 版形象（ContentScale.Crop 保持比例不变形 + 呼吸动画）
                       Image(
                           bitmap = customAvatar.asImageBitmap(),
                           contentDescription = null,
+                          contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                           modifier = Modifier
                               .size(160.dp)
                               .graphicsLayer {
@@ -2983,6 +3017,31 @@ jobs:
                               drawLine(color = androidx.compose.ui.graphics.Color(0xFF8D6E63),
                                   start = androidx.compose.ui.geometry.Offset(cx + 20f, cy + 60f), end = androidx.compose.ui.geometry.Offset(cx + 30f, cy + 80f),
                                   strokeWidth = 6f)
+                          }
+                          "running" -> {
+                              // 跑步：双腿摆动 + 身后尘土
+                              drawLine(color = androidx.compose.ui.graphics.Color(0xFF8D6E63),
+                                  start = androidx.compose.ui.geometry.Offset(cx - 10f, cy + 60f), end = androidx.compose.ui.geometry.Offset(cx - 35f, cy + 82f),
+                                  strokeWidth = 7f)
+                              drawLine(color = androidx.compose.ui.graphics.Color(0xFF8D6E63),
+                                  start = androidx.compose.ui.geometry.Offset(cx + 10f, cy + 60f), end = androidx.compose.ui.geometry.Offset(cx + 35f, cy + 82f),
+                                  strokeWidth = 7f)
+                              drawCircle(color = androidx.compose.ui.graphics.Color(0x55908090), radius = 6f, center = androidx.compose.ui.geometry.Offset(cx - 50f, cy + 70f))
+                              drawCircle(color = androidx.compose.ui.graphics.Color(0x33908090), radius = 5f, center = androidx.compose.ui.geometry.Offset(cx - 60f, cy + 60f))
+                          }
+                          "singing" -> {
+                              // 唱歌：音符
+                              drawCircle(color = androidx.compose.ui.graphics.Color(0xFFE91E63), radius = 6f, center = androidx.compose.ui.geometry.Offset(cx + 45f, cy - 30f))
+                              drawRect(color = androidx.compose.ui.graphics.Color(0xFFE91E63),
+                                  topLeft = androidx.compose.ui.geometry.Offset(cx + 51f, cy - 48f), size = androidx.compose.ui.geometry.Size(3f, 20f))
+                              drawCircle(color = androidx.compose.ui.graphics.Color(0xFFF06292), radius = 5f, center = androidx.compose.ui.geometry.Offset(cx + 62f, cy - 22f))
+                          }
+                          "dancing" -> {
+                              // 跳舞：转圈 + 星星
+                              drawCircle(color = androidx.compose.ui.graphics.Color(0xFFBA68C8), radius = 4f, center = androidx.compose.ui.geometry.Offset(cx - 45f, cy - 20f))
+                              drawCircle(color = androidx.compose.ui.graphics.Color(0xFFBA68C8), radius = 4f, center = androidx.compose.ui.geometry.Offset(cx + 45f, cy - 40f))
+                              drawCircle(color = androidx.compose.ui.graphics.Color(0xFF9575CD), radius = 3f, center = androidx.compose.ui.geometry.Offset(cx - 30f, cy + 55f))
+                              drawCircle(color = androidx.compose.ui.graphics.Color(0xFF9575CD), radius = 3f, center = androidx.compose.ui.geometry.Offset(cx + 30f, cy + 55f))
                           }
                       }
                   }
