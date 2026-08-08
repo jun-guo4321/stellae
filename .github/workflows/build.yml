@@ -52,8 +52,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 18
-                  versionName = "2.7"
+                  versionCode = 19
+                  versionName = "2.8"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -2532,6 +2532,7 @@ jobs:
           import android.Manifest
           import android.os.Bundle
           import androidx.activity.ComponentActivity
+          import androidx.activity.compose.BackHandler
           import androidx.activity.compose.setContent
           import androidx.activity.compose.rememberLauncherForActivityResult
           import androidx.activity.result.contract.ActivityResultContracts
@@ -2568,6 +2569,7 @@ jobs:
           import com.google.accompanist.permissions.isGranted
           import com.google.accompanist.permissions.rememberPermissionState
           import com.example.stellae.ui.settings.SettingsScreen
+          import kotlinx.coroutines.delay
           import kotlinx.coroutines.launch
 
           class MainActivity : ComponentActivity() {
