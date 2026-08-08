@@ -51,8 +51,8 @@ jobs:
                   applicationId = "com.example.stellae"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 8
-                  versionName = "1.7"
+                  versionCode = 9
+                  versionName = "1.8"
               }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
@@ -133,7 +133,17 @@ jobs:
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" /> <!-- 悬浮窗 -->
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
               <uses-feature android:name="android.hardware.camera" android:required="false" />
-              <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
+              <uses-feature android:name="android.hardware.microphone" android:required="false" />
+              <!-- Android 11+ 包可见性：必须声明才能检测到系统语音识别服务、相机、相册 -->
+              <queries>
+                  <intent><action android:name="android.intent.action.TTS_SERVICE"/></intent>
+                  <intent><action android:name="android.speech.RecognitionService"/></intent>
+                  <intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>
+                  <intent><action android:name="android.media.action.VIDEO_CAPTURE"/></intent>
+                  <intent><action android:name="android.intent.action.GET_CONTENT"/></intent>
+                  <intent><action android:name="android.intent.action.OPEN_DOCUMENT"/></intent>
+                  <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="video/*"/></intent>
+              </queries>
               <application android:label="Stellae" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
@@ -296,6 +306,9 @@ jobs:
           import androidx.compose.ui.text.TextStyle
           import androidx.compose.ui.text.font.FontFamily
           import androidx.compose.ui.text.font.FontWeight
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.compose.ui.platform.LocalContext
           import androidx.compose.ui.unit.sp
           val Typography = Typography(
               bodyLarge = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.5.sp),
@@ -1192,9 +1205,10 @@ jobs:
                   .readTimeout(20, TimeUnit.SECONDS)
                   .callTimeout(30, TimeUnit.SECONDS)
                   .build()
-              private val API_KEY = "ark-cc51dab3-1c7e-4f20-9764-45ec3dfa2586-2d686"
-              private val BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-
+              // 火山方舟配置（可在设置里修改，默认值已内置）
+              var apiKey: String = "ark-cc51dab3-1c7e-4f20-9764-45ec3dfa2586-2d686"
+              var baseUrl: String = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+              var modelId: String = "ep-20260807115902-67t9m"
               var currentLocation: LocationInfo? = null
 
               fun routeTask(input: String): TaskType {
@@ -1439,13 +1453,13 @@ jobs:
                       repeat(3) { attempt ->
                           try {
                               val requestMap = HashMap<String, Any>()
-                              requestMap["model"] = "ep-20260807115902-67t9m"
+                              requestMap["model"] = modelId
                               requestMap["messages"] = messages
                               requestMap["temperature"] = 0.85
                               requestMap["max_tokens"] = 150
 
                               val body = gson.toJson(requestMap).toRequestBody("application/json".toMediaType())
-                              val request = Request.Builder().url(BASE_URL).header("Authorization", "Bearer $API_KEY").post(body).build()
+                              val request = Request.Builder().url(baseUrl).header("Authorization", "Bearer $apiKey").post(body).build()
                               client.newCall(request).execute().use { response ->
                                   if (response.isSuccessful) {
                                       val resp = gson.fromJson(response.body?.string(), ChatCompletionResponse::class.java)
@@ -1572,6 +1586,8 @@ jobs:
               val companionStatus: StateFlow<String> = _companionStatus.asStateFlow()
               private val _companionName = MutableStateFlow("\u661f\u9ece")
               val companionName: StateFlow<String> = _companionName.asStateFlow()
+              private val _avatarImage = MutableStateFlow("")
+              val avatarImage: StateFlow<String> = _avatarImage.asStateFlow()
               private var currentLocation: LocationInfo? = null
               private val httpClient = OkHttpClient.Builder().build()
               private val gson = Gson()
@@ -1592,6 +1608,10 @@ jobs:
                   speechManager.speechVolume = getVoiceVolume()
                   speechManager.asrApiKey = getAsrApiKey()
                   speechManager.asrSecretKey = getAsrSecretKey()
+                  aiRepository.apiKey = getApiKey()
+                  aiRepository.baseUrl = getBaseUrl()
+                  aiRepository.modelId = getModelId()
+                  _avatarImage.value = getAvatarImage()
               }
 
               // 设置方法
@@ -1641,6 +1661,18 @@ jobs:
               // 数字人开关（Q版形象展示）
               fun getAvatarEnabled(): Boolean = runBlocking { memoryManager.getSetting("avatar_enabled") != "0" }
               fun setAvatarEnabled(v: Boolean) { viewModelScope.launch { memoryManager.setSetting("avatar_enabled", if (v) "1" else "0") } }
+
+              // 火山方舟 API 配置（默认值已内置）
+              fun getApiKey(): String = runBlocking { memoryManager.getSetting("api_key") ?: "ark-cc51dab3-1c7e-4f20-9764-45ec3dfa2586-2d686" }
+              fun setApiKey(k: String) { viewModelScope.launch { memoryManager.setSetting("api_key", k); aiRepository.apiKey = k } }
+              fun getBaseUrl(): String = runBlocking { memoryManager.getSetting("api_base_url") ?: "https://ark.cn-beijing.volces.com/api/v3/chat/completions" }
+              fun setBaseUrl(u: String) { viewModelScope.launch { memoryManager.setSetting("api_base_url", u); aiRepository.baseUrl = u } }
+              fun getModelId(): String = runBlocking { memoryManager.getSetting("model_id") ?: "ep-20260807115902-67t9m" }
+              fun setModelId(m: String) { viewModelScope.launch { memoryManager.setSetting("model_id", m); aiRepository.modelId = m } }
+
+              // 数字人形象（base64 图片，空=用内置 Canvas 形象）
+              fun getAvatarImage(): String = runBlocking { memoryManager.getSetting("avatar_image") ?: "" }
+              fun setAvatarImage(b64: String) { viewModelScope.launch { memoryManager.setSetting("avatar_image", b64); _avatarImage.value = b64 } }
               
               // 休息时间设置：几点到几点休息，期间不回复
               fun getRestEnabled(): Boolean = runBlocking { memoryManager.getSetting("rest_enabled") == "1" }
@@ -1731,7 +1763,7 @@ jobs:
               }
 
               // 用单次定位请求主动获取最新位置（等 5 秒）
-              // 用单次定位请求主动获取最新位置（简单阻塞实现，等 5 秒）
+              // 用单次定位请求主动获取最新位置（同时请求 GPS + 网络，等 10 秒）
               private suspend fun requestFreshLocation(): android.location.Location? {
                   return withContext(Dispatchers.IO) {
                       val latch = java.util.concurrent.CountDownLatch(1)
@@ -1744,18 +1776,26 @@ jobs:
                           override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
                           override fun onProviderEnabled(provider: String) {}
                           override fun onProviderDisabled(provider: String) {
-                              latch.countDown()
+                              // 一个 provider 关了不代表另一个也关，不急着解锁
                           }
                       }
                       try {
                           val fine = (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.ACCESS_FINE_LOCATION)
                               == PackageManager.PERMISSION_GRANTED)
-                          val provider = if (fine) android.location.LocationManager.GPS_PROVIDER
-                              else android.location.LocationManager.NETWORK_PROVIDER
-                          if (locationManager.isProviderEnabled(provider)) {
-                              locationManager.requestSingleUpdate(provider, listener, android.os.Looper.getMainLooper())
-                              latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                          // 同时向 GPS 和网络定位请求，哪个先返回用哪个
+                          val providers = mutableListOf<String>()
+                          if (fine) providers.add(android.location.LocationManager.GPS_PROVIDER)
+                          providers.add(android.location.LocationManager.NETWORK_PROVIDER)
+                          var registered = false
+                          for (p in providers) {
+                              try {
+                                  if (locationManager.isProviderEnabled(p)) {
+                                      locationManager.requestSingleUpdate(p, listener, android.os.Looper.getMainLooper())
+                                      registered = true
+                                  }
+                              } catch (e: Exception) {}
                           }
+                          if (registered) latch.await(10, java.util.concurrent.TimeUnit.SECONDS)
                       } catch (e: Exception) {
                           e.printStackTrace()
                       } finally {
@@ -2056,6 +2096,25 @@ jobs:
               var asrApiKey by remember { mutableStateOf(viewModel.getAsrApiKey()) }
               var asrSecretKey by remember { mutableStateOf(viewModel.getAsrSecretKey()) }
               var avatarEnabled by remember { mutableStateOf(viewModel.getAvatarEnabled()) }
+              var apiKey by remember { mutableStateOf(viewModel.getApiKey()) }
+              var baseUrl by remember { mutableStateOf(viewModel.getBaseUrl()) }
+              var modelId by remember { mutableStateOf(viewModel.getModelId()) }
+              val context = LocalContext.current
+              val avatarPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                  if (uri != null) {
+                      try {
+                          val bmp = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) }
+                          if (bmp != null) {
+                              // 压缩到 256x256 再存 base64，避免 Room 存不下
+                              val scaled = android.graphics.Bitmap.createScaledBitmap(bmp, 256, 256, true)
+                              val stream = java.io.ByteArrayOutputStream()
+                              scaled.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)
+                              val b64 = android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+                              viewModel.setAvatarImage(b64)
+                          }
+                      } catch (e: Exception) {}
+                  }
+              }
 
               Scaffold(
                   topBar = { TopAppBar(title = { Text("设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }) }
@@ -2209,13 +2268,39 @@ jobs:
                       Card { Column(modifier = Modifier.padding(16.dp)) {
                           Text("Q版数字人", style = MaterialTheme.typography.titleMedium)
                           Spacer(modifier = Modifier.height(4.dp))
-                          Text("在对话页顶部展示一个会随情绪/活动变化的 Q 版小人（读书、吃饭、散步、睡觉等动作）。", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+                          Text("在对话页顶部展示一个会随情绪/活动变化的 Q 版小人（读书、吃饭、散步、睡觉等动作）。也可以上传自己的形象图替换。", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
                           Row(verticalAlignment = Alignment.CenterVertically) {
                               Text("显示数字人", modifier = Modifier.weight(1f))
                               Switch(checked = avatarEnabled, onCheckedChange = { avatarEnabled = it; viewModel.setAvatarEnabled(it) })
                           }
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                              OutlinedButton(onClick = { avatarPickerLauncher.launch("image/*") }) {
+                                  Text("上传形象图")
+                              }
+                              OutlinedButton(onClick = { viewModel.setAvatarImage("") }) {
+                                  Text("恢复默认")
+                              }
+                          }
+                          Spacer(modifier = Modifier.height(4.dp))
+                          Text("提示：可先用 AI 绘图工具把照片转成 Q 版头像，再上传为数字人形象。", fontSize = 11.sp, color = androidx.compose.ui.graphics.Color.Gray)
                       }}
-
+                      // 6.6 模型 API 配置（火山方舟）
+                      Card { Column(modifier = Modifier.padding(16.dp)) {
+                          Text("模型 API 配置（火山方舟）", style = MaterialTheme.typography.titleMedium)
+                          Spacer(modifier = Modifier.height(4.dp))
+                          Text("大模型对话使用的火山方舟 API Key 和模型 ID，默认值已内置。", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+                          Spacer(modifier = Modifier.height(8.dp))
+                          OutlinedTextField(value = apiKey, onValueChange = { apiKey = it }, label = { Text("API Key") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                          Spacer(modifier = Modifier.height(8.dp))
+                          OutlinedTextField(value = modelId, onValueChange = { modelId = it }, label = { Text("模型 ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                          Spacer(modifier = Modifier.height(8.dp))
+                          OutlinedTextField(value = baseUrl, onValueChange = { baseUrl = it }, label = { Text("接口地址") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Button(onClick = { viewModel.setApiKey(apiKey.trim()); viewModel.setModelId(modelId.trim()); viewModel.setBaseUrl(baseUrl.trim()) }) {
+                              Text("保存 API 配置")
+                          }
+                      }}
                       // 7. 语音通话服务地址（预设选项）
                       Card { Column(modifier = Modifier.padding(16.dp)) {
                           Text("语音通话", style = MaterialTheme.typography.titleMedium)
@@ -2357,6 +2442,7 @@ jobs:
           import androidx.compose.ui.draw.clip
           import androidx.compose.ui.graphics.Color
           import androidx.compose.ui.graphics.asImageBitmap
+          import androidx.compose.ui.graphics.graphicsLayer
           import androidx.compose.ui.text.input.ImeAction
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
@@ -2385,6 +2471,7 @@ jobs:
               val relationshipStage by viewModel.relationshipStage.collectAsState()
               val companionName by viewModel.companionName.collectAsState()
               val companionStatus by viewModel.companionStatus.collectAsState()
+              val avatarImage by viewModel.avatarImage.collectAsState()
               val listState = rememberLazyListState()
               var inputText by remember { mutableStateOf("") }
               val scope = rememberCoroutineScope()
@@ -2418,25 +2505,41 @@ jobs:
                   }
               }
 
-              // 视频拍摄（调用系统相机）——使用手动 intent 并授予 URI 写权限，避免闪退
+              // 视频拍摄（调用系统相机）——先检测相机可用性再启动，避免闪退
               var videoOutputUri by remember { mutableStateOf<android.net.Uri?>(null) }
               val videoLauncher = rememberLauncherForActivityResult(
                   ActivityResultContracts.StartActivityForResult()
               ) { result ->
                   if (result.resultCode == android.app.Activity.RESULT_OK) {
-                      videoOutputUri?.let { uri -> viewModel.sendVideo(uri.toString()) }
+                      // 优先用相机返回的 data uri；部分 ROM 相机不写 EXTRA_OUTPUT
+                      val uri = result.data?.data ?: videoOutputUri
+                      if (uri != null) viewModel.sendVideo(uri.toString())
                   }
               }
 
               fun launchVideoCapture() {
                   try {
+                      // 1. 检查是否有相机应用可处理拍摄请求
+                      val baseIntent = android.content.Intent(android.provider.MediaStore.ACTION_VIDEO_CAPTURE)
+                      val resolve = baseIntent.resolveActivity(context.packageManager)
+                      if (resolve == null) {
+                          viewModel.sendMessage("未检测到可用的相机应用，请检查系统相机")
+                          return
+                      }
+                      // 2. 准备输出文件
                       val dir = java.io.File(context.cacheDir, "videos")
                       if (!dir.exists()) dir.mkdirs()
                       val file = java.io.File(dir, "video_${System.currentTimeMillis()}.mp4")
+                      try {
+                          file.createNewFile()
+                      } catch (e: Exception) {
+                          viewModel.sendMessage("无法创建视频文件: ${e.message}")
+                          return
+                      }
                       videoOutputUri = androidx.core.content.FileProvider.getUriForFile(
                           context, context.packageName + ".fileprovider", file
                       )
-                      // 手动构建系统相机 intent，显式授予读/写权限（CaptureVideo 合约在部分 ROM 上不授权会闪退）
+                      // 3. 构建 intent 并授予 URI 读写权限
                       val intent = android.content.Intent(android.provider.MediaStore.ACTION_VIDEO_CAPTURE).apply {
                           putExtra(android.provider.MediaStore.EXTRA_OUTPUT, videoOutputUri)
                           putExtra(android.provider.MediaStore.EXTRA_VIDEO_QUALITY, 1)
@@ -2444,6 +2547,8 @@ jobs:
                           addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                       }
                       videoLauncher.launch(intent)
+                  } catch (e: ActivityNotFoundException) {
+                      viewModel.sendMessage("没有找到能录视频的应用")
                   } catch (e: Exception) {
                       viewModel.sendMessage("无法打开相机: ${e.message}")
                   }
@@ -2504,7 +2609,8 @@ jobs:
                                   emotion = currentEmotion,
                                   status = companionStatus,
                                   isProcessing = isProcessing,
-                                  companionName = companionName
+                                  companionName = companionName,
+                                  avatarImage = avatarImage
                               )
                           }
 
@@ -2722,13 +2828,22 @@ jobs:
 
           // ===== Q版数字人（Canvas 绘制，根据情绪/活动切换表情动作）=====
           @Composable
-          fun DigitalHumanPanel(emotion: String, status: String, isProcessing: Boolean, companionName: String) {
+          fun DigitalHumanPanel(emotion: String, status: String, isProcessing: Boolean, companionName: String, avatarImage: String = "") {
               val mood = when {
                   emotion.contains("开心") -> 0
                   emotion.contains("难过") -> 1
                   emotion.contains("生气") -> 2
                   emotion.contains("担心") -> 3
                   else -> 0
+              }
+              // 用户上传的自定义形象图（base64），有则优先显示
+              val customAvatar = remember(avatarImage) {
+                  if (avatarImage.isNotBlank()) {
+                      try {
+                          val bytes = android.util.Base64.decode(avatarImage, android.util.Base64.DEFAULT)
+                          android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                      } catch (e: Exception) { null }
+                  } else null
               }
               // 根据"正在做什么"决定动作
               val action = when {
@@ -2755,6 +2870,22 @@ jobs:
                       .background(Color(0xFFF8F6FF)),
                   contentAlignment = Alignment.Center
               ) {
+                  if (customAvatar != null) {
+                      // 用户上传的自定义 Q 版形象（圆形 + 呼吸动画）
+                      Image(
+                          bitmap = customAvatar.asImageBitmap(),
+                          contentDescription = null,
+                          modifier = Modifier
+                              .size(160.dp)
+                              .graphicsLayer {
+                                  val s = 1f + (bob - 0.5f) * 0.06f
+                                  scaleX = s
+                                  scaleY = s
+                              }
+                              .clip(androidx.compose.foundation.shape.CircleShape)
+                              .background(Color(0xFFEDE7F6))
+                      )
+                  } else {
                   Canvas(modifier = Modifier.size(170.dp)) {
                       val w = size.width
                       val h = size.height
@@ -2849,6 +2980,7 @@ jobs:
                                   strokeWidth = 6f)
                           }
                       }
+                  }
                   }
                   // 名称标签
                   Surface(
