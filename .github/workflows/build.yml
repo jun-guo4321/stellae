@@ -2730,10 +2730,14 @@ jobs:
                                           modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                                           horizontalArrangement = Arrangement.spacedBy(20.dp)
                                       ) {
-                                          MoreActionItem(Icons.Default.PhotoLibrary, "相册") {
-                                              galleryLauncher.launch("image/*")
-                                              showMorePanel = false
-                                          }
+                                          MoreActionItem(
+                                              icon = Icons.Default.PhotoLibrary,
+                                              label = "相册",
+                                              onClick = {
+                                                  galleryLauncher.launch("image/*")
+                                                  showMorePanel = false
+                                              }
+                                          )
                                           // 拍照：单击=拍照，长按=录像（相机权限未授予时自动申请）
                                           MoreActionItem(
                                               icon = Icons.Default.PhotoCamera,
@@ -2755,10 +2759,14 @@ jobs:
                                                   showMorePanel = false
                                               }
                                           )
-                                          MoreActionItem(Icons.Default.Place, "位置") {
-                                              if (locationPermissionState.status.isGranted) viewModel.sendLocation() else locationPermissionState.launchPermissionRequest()
-                                              showMorePanel = false
-                                          }
+                                          MoreActionItem(
+                                              icon = Icons.Default.Place,
+                                              label = "位置",
+                                              onClick = {
+                                                  if (locationPermissionState.status.isGranted) viewModel.sendLocation() else locationPermissionState.launchPermissionRequest()
+                                                  showMorePanel = false
+                                              }
+                                          )
                                       }
                                   }
                               }
